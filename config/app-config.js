@@ -11,6 +11,6 @@
 window.KOB_CONFIG = {
     env: 'prod',
     supabaseUrl: 'https://qlrpokxghtvbaxsnwhno.supabase.co',
-    supabaseAnonKey: '',   // TODO: 운영 Supabase › Project Settings › API Keys › Publishable key (sb_publishable_…)
+    supabaseAnonKey: 'sb_publishable_tAKzec0L9rNyNKW7kpjI7A_r9dxv9hY',
     apiBase: ''
 };
