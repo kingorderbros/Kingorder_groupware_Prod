@@ -3,7 +3,7 @@
 #   · 정적 파일: 이 폴더 전체 ([assets], 뺄 것은 .assetsignore)
 #   · /api/*  : worker.js → functions/api/[[route]].js (Pages Functions 코드 그대로)
 # name 은 대시보드에서 만든 Worker 이름과 **같아야** 합니다 (다르면 그 이름으로 Worker 가 하나 더 생깁니다).
-name = "kingorder-groupware"
+name = "kingorder-groupware-prod"
 main = "worker.js"
 compatibility_date = "2026-09-01"
 # 대시보드(Settings › Variables and Secrets)에서 넣은 변수를 배포 때 지우지 않습니다.
