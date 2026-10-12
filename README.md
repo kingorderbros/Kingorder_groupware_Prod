@@ -1,4 +1,13 @@
-# 킹오더브라더스 그룹웨어 — 개발환경
+# 킹오더브라더스 그룹웨어 — 운영환경 (prod)
+
+> **2026-10-12 개발환경에서 갈라 옴.** 이 폴더(`그룹웨어/운영환경`)는 운영 배포용입니다.
+> - GitHub `kingorderbros/Kingorder_groupware_Prod` (원격 `origin`, 브랜치 `main` = prod 배포)
+> - Supabase `https://qlrpokxghtvbaxsnwhno.supabase.co` · Cloudflare Worker `kingorder-groupware`
+> - 개발환경과 다른 파일: `config/app-config.js`(env prod · 운영 Supabase) · `wrangler.toml`(Worker 이름) · `.dev.vars.example`
+> - **고치는 일은 개발환경에서** 하고 UAT 를 마친 뒤 여기로 가져옵니다:
+>   `git fetch dev && git merge dev/develop` → (위 3개 파일은 prod 값 유지) → `git push origin main`
+> - 아래 본문은 개발환경 때 쓴 안내입니다 — 이름 · 주소는 위 prod 값으로 바꿔 읽습니다.
+
 
 시연본(`../소스/Index_ver1.0.html`)에서 **샘플 데이터를 모두 빼고**, GitHub · Supabase · Cloudflare 로 돌아가게 꾸린 소스입니다.
 이 폴더가 **그룹웨어 GitHub 저장소의 루트**가 됩니다.
