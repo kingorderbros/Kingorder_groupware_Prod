@@ -4820,8 +4820,13 @@
                         <input type="date" id="prj-start-plan" required class="w-full p-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500" />
                     </div>
                     <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">종료 예정일 <span class="text-red-500">*</span></label>
-                        <input type="date" id="prj-end-plan" required class="w-full p-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                        <label class="flex items-center justify-between text-sm font-medium text-gray-700 mb-1">
+                            <span>종료 예정일 <span class="text-red-500">*</span></span>
+                            <!-- 종료일을 아직 정하지 못한 프로젝트 (2026-10-20) -->
+                            <span class="inline-flex items-center gap-1 text-xs font-normal text-gray-600 cursor-pointer"><input type="checkbox" id="prj-end-tbd" onchange="onProjectEndTbdChange()" class="rounded border-gray-300 text-blue-600" />미정</span>
+                        </label>
+                        <input type="date" id="prj-end-plan" required class="w-full p-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-400" />
+                        <p id="prj-end-tbd-note" class="hidden text-[11px] text-gray-500 mt-1">종료 예정일이 정해지면 미정 선택을 해제하고 날짜를 입력해 주세요.</p>
                     </div>
                 </div>
                 <div id="prj-actual-wrap" class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4 hidden">
@@ -20167,7 +20172,7 @@ const QUOTE_TEMPLATES = [
             document.getElementById('prj-d-delay').innerHTML = dl.length
                 ? `<span class="text-xs font-bold rounded-full px-2 py-0.5 border text-red-700 bg-red-50 border-red-200"><i class="fas fa-triangle-exclamation mr-0.5"></i>지연 ${dl.length}건</span>` : '';
             document.getElementById('prj-d-meta').innerHTML =
-                `${escapeHtml(deptNames[p.dept] || p.dept)} · PM <b class="text-gray-700">${escapeHtml(p.owner)}</b> · 예정 ${escapeHtml(p.startPlan)} ~ ${escapeHtml(p.endPlan)}`
+                `${escapeHtml(deptNames[p.dept] || p.dept)} · PM <b class="text-gray-700">${escapeHtml(p.owner)}</b> · 예정 ${escapeHtml(p.startPlan)} ~ ${escapeHtml(projectEndLabel(p))}`
                 + (p.startActual ? ` · 실제 시작 <b class="text-gray-700">${escapeHtml(p.startActual)}</b>` : '')
                 + (p.endActual ? ` · 실제 종료 <b class="text-gray-700">${escapeHtml(p.endActual)}</b>` : '');
             document.getElementById('prj-d-desc').textContent = p.description || '';
@@ -20227,7 +20232,8 @@ const QUOTE_TEMPLATES = [
 
             // 일정 대비 진척 — 기간 경과율과 실제 진척률을 비교해 앞섰는지/뒤졌는지 판단
             const today = ymd(new Date());
-            const total = Math.max(1, dayDiff(p.startPlan, p.endPlan));
+            const endTbd = isProjectEndTbd(p);                     // 종료 예정일 미정이면 기간 경과율을 셀 수 없습니다 (2026-10-20)
+            const total = endTbd ? 1 : Math.max(1, dayDiff(p.startPlan, p.endPlan));
             const passed = Math.min(total, Math.max(0, dayDiff(p.startPlan, today)));
             const expected = Math.round(passed / total * 100);
             const gap = pct - expected;
@@ -20254,7 +20260,15 @@ const QUOTE_TEMPLATES = [
                     ${statCard('지연', delays.length + '건', delays.length ? 'text-red-600' : 'text-gray-400')}
                 </div>
 
-                <div class="bg-white border border-gray-200 rounded p-4 mb-4">
+                ${endTbd ? `<div class="bg-white border border-gray-200 rounded p-4 mb-4">
+                    <p class="text-sm font-bold text-gray-700 mb-2">일정 대비 진척</p>
+                    <div class="flex items-center gap-2">
+                        <span class="text-xs text-gray-500 w-20 shrink-0">실제 진척</span>
+                        <div class="flex-1 h-2 bg-gray-200 rounded-full overflow-hidden"><div class="h-full bg-blue-500 rounded-full" style="width:${pct}%"></div></div>
+                        <span class="text-xs font-bold text-gray-600 tabular-nums w-10 text-right">${pct}%</span>
+                    </div>
+                    <p class="text-sm mt-3 text-gray-500"><i class="fas fa-circle-info mr-1"></i>종료 예정일이 <b>미정</b>이라 기간 경과율과 비교하지 않습니다.</p>
+                </div>` : `<div class="bg-white border border-gray-200 rounded p-4 mb-4">
                     <p class="text-sm font-bold text-gray-700 mb-3">일정 대비 진척</p>
                     <div class="space-y-2">
                         <div class="flex items-center gap-2">
@@ -20273,7 +20287,7 @@ const QUOTE_TEMPLATES = [
                         기간 경과율 대비 <b>${gap >= 0 ? '+' : ''}${gap}%p</b> ${gap >= 0 ? '앞서 있습니다' : '뒤처져 있습니다'}
                         <span class="text-gray-500 text-xs ml-1">(전체 ${total}일 중 ${passed}일 경과)</span>
                     </p>
-                </div>
+                </div>`}
 
                 <div class="bg-white border border-gray-200 rounded p-4">
                     <p class="text-sm font-bold text-gray-700 mb-3">담당자별 진척</p>
@@ -20541,12 +20555,25 @@ const QUOTE_TEMPLATES = [
             fillUserSelect(document.getElementById('prj-owner'), '', p ? p.owner : currentUserName);
             document.getElementById('prj-name').value = p ? p.name : '';
             document.getElementById('prj-start-plan').value = p ? p.startPlan : '';
-            document.getElementById('prj-end-plan').value = p ? p.endPlan : '';
+            document.getElementById('prj-end-plan').value = p ? (p.endPlan || '') : '';
+            document.getElementById('prj-end-tbd').checked = !!(p && isProjectEndTbd(p));
+            onProjectEndTbdChange();
             document.getElementById('prj-start-actual').value = p ? (p.startActual || '') : '';
             document.getElementById('prj-end-actual').value = p ? (p.endActual || '') : '';
             document.getElementById('prj-status').value = p ? p.status : 'planning';
             document.getElementById('prj-desc').value = p ? (p.description || '') : '';
             document.getElementById('project-modal').classList.remove('hidden');
+        }
+        // 종료 예정일 미정 (2026-10-20) — 날짜 칸을 막고 필수에서 뺍니다
+        function isProjectEndTbd(p) { return !!p && (p.endTbd === true || !p.endPlan); }
+        function projectEndLabel(p) { return isProjectEndTbd(p) ? '미정' : (p.endPlan || '-'); }
+        function onProjectEndTbdChange() {
+            const tbd = document.getElementById('prj-end-tbd').checked;
+            const el = document.getElementById('prj-end-plan');
+            el.disabled = tbd; el.required = !tbd;
+            if (tbd) el.value = '';
+            const note = document.getElementById('prj-end-tbd-note');
+            if (note) note.classList.toggle('hidden', !tbd);
         }
         function closeProjectModal() {
             document.getElementById('project-modal').classList.add('hidden');
@@ -20556,14 +20583,16 @@ const QUOTE_TEMPLATES = [
             event.preventDefault();
             const id = document.getElementById('prj-edit-id').value;
             const startPlan = document.getElementById('prj-start-plan').value;
-            const endPlan = document.getElementById('prj-end-plan').value;
-            if (endPlan < startPlan) { alert('종료 예정일이 시작 예정일보다 빠릅니다.'); return; }
+            const endTbd = document.getElementById('prj-end-tbd').checked;
+            const endPlan = endTbd ? '' : document.getElementById('prj-end-plan').value;
+            if (!endTbd && !endPlan) { alert('종료 예정일을 입력하거나 [미정]을 선택해 주세요.'); return; }
+            if (endPlan && endPlan < startPlan) { alert('종료 예정일이 시작 예정일보다 빠릅니다.'); return; }
 
             const data = {
                 name: document.getElementById('prj-name').value.trim(),
                 dept: document.getElementById('prj-dept').value,
                 owner: document.getElementById('prj-owner').value,
-                startPlan, endPlan,
+                startPlan, endPlan, endTbd,
                 startActual: document.getElementById('prj-start-actual').value,
                 endActual: document.getElementById('prj-end-actual').value,
                 status: document.getElementById('prj-status').value,
@@ -20665,7 +20694,7 @@ const QUOTE_TEMPLATES = [
                 { id: 'all',  name: '전체', n: all.length }
             ];
             const list = all.filter(p => itPrjFilter === 'all' ? true : itPrjFilter === 'open' ? (p.status === 'planning' || p.status === 'active') : p.status === itPrjFilter)
-                .sort((a, b) => String(a.endPlan || '').localeCompare(String(b.endPlan || '')));
+                .sort((a, b) => String(a.endPlan || '9999').localeCompare(String(b.endPlan || '9999')));   // 미정은 뒤로
             const card = p => {
                 const st = PROJECT_STATUS[p.status] || PROJECT_STATUS.planning;
                 const prog = projectProgress(p);
@@ -20680,7 +20709,7 @@ const QUOTE_TEMPLATES = [
                         <p class="font-semibold text-gray-800 truncate">${escapeHtml(p.name)}</p>
                         <span class="shrink-0 text-xs px-2 py-0.5 rounded border ${st.chip}">${st.name}</span>
                     </div>
-                    <p class="text-xs text-gray-500 mt-1"><i class="fas fa-user-tie mr-1 text-gray-400"></i>PM ${escapeHtml(p.owner || '-')} · ${escapeHtml(p.startPlan || '-')} ~ ${escapeHtml(p.endPlan || '-')}
+                    <p class="text-xs text-gray-500 mt-1"><i class="fas fa-user-tie mr-1 text-gray-400"></i>PM ${escapeHtml(p.owner || '-')} · ${escapeHtml(p.startPlan || '-')} ~ ${escapeHtml(projectEndLabel(p))}
                         ${dday !== null ? `<span class="ml-1 font-semibold ${dday < 0 ? 'text-red-600' : dday <= 7 ? 'text-amber-600' : 'text-gray-500'}">${dday < 0 ? `D+${-dday}` : `D-${dday}`}</span>` : ''}</p>
                     <div class="mt-3 flex items-center gap-2">
                         <div class="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden"><div class="h-2 ${prog >= 100 ? 'bg-blue-500' : 'bg-cyan-500'}" style="width:${prog}%"></div></div>
@@ -24665,7 +24694,7 @@ const QUOTE_TEMPLATES = [
                     <td class="px-3 py-2 font-medium">${escapeHtml(p.name)}<span class="block text-[11px] font-mono text-gray-400">${escapeHtml(p.id)}</span></td>
                     <td class="px-3 py-2 whitespace-nowrap text-gray-500">${escapeHtml(deptNames[p.dept] || p.dept || '-')}</td>
                     <td class="px-3 py-2 whitespace-nowrap">${escapeHtml(p.owner || '-')}</td>
-                    <td class="px-3 py-2 whitespace-nowrap ${late ? 'text-red-600 font-semibold' : 'text-gray-500'}">${escapeHtml(p.startPlan || '-')} ~ ${escapeHtml(p.endPlan || '-')}${late ? ' (경과)' : ''}</td>
+                    <td class="px-3 py-2 whitespace-nowrap ${late ? 'text-red-600 font-semibold' : 'text-gray-500'}">${escapeHtml(p.startPlan || '-')} ~ ${escapeHtml(projectEndLabel(p))}${late ? ' (경과)' : ''}</td>
                     <td class="px-3 py-2">
                         <div class="flex items-center gap-2">
                             <div class="w-28 bg-gray-100 rounded-full h-1.5"><div class="bg-purple-500 h-1.5 rounded-full" style="width:${prog}%"></div></div>
@@ -24756,7 +24785,7 @@ const QUOTE_TEMPLATES = [
                 const p = (projects || []).find(x => x.id === pid);
                 if (!p) return;
                 eyebrow = '⑤ 프로젝트 현황'; title = p.name;
-                sub = `${deptNames[p.dept] || p.dept} · PM ${p.owner || '-'} · ${p.startPlan || '-'} ~ ${p.endPlan || '-'} · 진척 ${projectProgress(p)}%`;
+                sub = `${deptNames[p.dept] || p.dept} · PM ${p.owner || '-'} · ${p.startPlan || '-'} ~ ${projectEndLabel(p)} · 진척 ${projectProgress(p)}%`;
                 // 그 프로젝트 자신 + 그 프로젝트의 WBS 작업만 (id 로 정확히 고릅니다)
                 const wbsIds = wbsLeaves(p).map(w => w.id);
                 list = execItems.filter(i => i.id === p.id || (i.kind === 'wbs' && wbsIds.indexOf(i.id) > -1));
@@ -41542,7 +41571,8 @@ await fetch('${escapeHtml(url)}', { method: 'POST', headers: { 'Content-Type': '
         // [목록] 은 한 줄씩, [소속 트리] 는 본사 · 파트너사 아래에 소속 가맹점을 묶어 보여 줍니다.
         // 줄을 누르면 — 가맹점 3종은 가맹점 상세(운영 · 결제 정보까지), 나머지는 업체 기본정보 창이 열립니다.
         // 거래 조건(계약서 · 거래 품목 · PG 수수료 …)은 지금처럼 영업본부 › 거래처 관리 › 파트너사 탭에서 다룹니다.
-        let companyFilter = { q: '', kind: '', status: '', view: 'list', limit: 300 };
+        // cols — 표 칸별 거르기 (2026-10-19): name · businessNo · contact · phone (글자 포함), parent · contract · ids (목록에서 고름)
+        let companyFilter = { q: '', kind: '', status: '', view: 'list', limit: 300, cols: {} };
         const COMPANY_PAGE = 300;          // 한 번에 그리는 줄 수 — 엑셀로 수천 곳이 올라와도 화면이 굳지 않게
         function companyAccountCount(id) {
             try { return partnerAccounts.filter(a => a.partnerId === id).length; } catch (e) { return 0; }
@@ -41556,12 +41586,43 @@ await fetch('${escapeHtml(url)}', { method: 'POST', headers: { 'Content-Type': '
             const norm = v => String(v || '').replace(/\s+/g, '').toLowerCase();
             return norm([c.name, c.businessNo, c.contactName, c.phone, c.address, c.note, c.memo, partnerCustTypeName(c.kind), companyParentName(c)].join(' ')).includes(q);
         }
+        // 계약 칸 값 — 거르기용 (가맹점 3종만 계약을 셉니다)
+        function companyContractKey(c, map) {
+            if (!isShopKind(c.kind)) return 'na';
+            const st = map[c.id];
+            if (!st || !st.count) return 'none';
+            if (st.hasActive) return 'active';
+            if (st.hasExpired) return 'expired';
+            return 'other';
+        }
+        const COMPANY_CONTRACT_OPTS = [['active', '활성 계약'], ['expired', '만료만'], ['other', '그 밖의 계약'], ['none', '계약 없음'], ['na', '해당 없음(가맹점 외)']];
+        function companyColMatch(c, cols, map) {
+            const norm = v => String(v || '').replace(/[\s-]/g, '').toLowerCase();
+            const has = (val, want) => !want || norm(val).includes(norm(want));
+            if (!has(companyNameOf(c), cols.name)) return false;
+            if (!has(c.businessNo, cols.businessNo)) return false;
+            if (!has(c.contactName, cols.contact)) return false;
+            if (!has(c.phone, cols.phone)) return false;
+            if (cols.parent) {
+                const pn = companyParentName(c);
+                if (cols.parent === '__none') { if (pn || !companyParentKind(c.kind)) return false; }      // 연결 안 됨
+                else if (cols.parent === '__na') { if (companyParentKind(c.kind)) return false; }          // 상위업체를 두지 않는 유형
+                else if (pn !== cols.parent) return false;
+            }
+            if (cols.contract && companyContractKey(c, map) !== cols.contract) return false;
+            if (cols.ids === 'yes' && !companyAccountCount(c.id)) return false;
+            if (cols.ids === 'no' && companyAccountCount(c.id)) return false;
+            return true;
+        }
         function companyFiltered() {
             const f = companyFilter;
             const q = String(f.q || '').replace(/\s+/g, '').toLowerCase();
+            const cols = f.cols || {};
+            const map = (cols.contract) ? getContractedCustomers() : null;
             return customers.filter(c => {
                 if (f.kind && c.kind !== f.kind) return false;
                 if (f.status && c.status !== f.status) return false;
+                if (!companyColMatch(c, cols, map)) return false;
                 return companyMatches(c, q);
             }).sort((a, b) => companyNameOf(a).localeCompare(companyNameOf(b), 'ko'));
         }
@@ -41570,7 +41631,40 @@ await fetch('${escapeHtml(url)}', { method: 'POST', headers: { 'Content-Type': '
             if (field !== 'limit') companyFilter.limit = COMPANY_PAGE;
             renderCompanies();
         }
-        function resetCompanyFilter() { companyFilter = { q: '', kind: '', status: '', view: companyFilter.view, limit: COMPANY_PAGE }; renderCompanies(); }
+        function resetCompanyFilter() { companyFilter = { q: '', kind: '', status: '', view: companyFilter.view, limit: COMPANY_PAGE, cols: {} }; renderCompanies(); }
+        // 표 칸 거르기 (2026-10-19) — 글자 칸은 칠 때마다 표만 다시 그리고 커서를 그 칸에 돌려놓습니다
+        function setCompanyCol(key, value, typing) {
+            companyFilter.cols = Object.assign({}, companyFilter.cols || {}, { [key]: value || '' });
+            companyFilter.limit = COMPANY_PAGE;
+            if (!typing) { renderCompanies(); return; }
+            const el = document.activeElement, pos = el && el.selectionStart;
+            drawCompanyRows();
+            const again = document.querySelector(`[data-ccol="${key}"]`);
+            if (again) { again.focus(); try { again.setSelectionRange(pos, pos); } catch (e) { /* 무시 */ } }
+        }
+        function clearCompanyCols() { companyFilter.cols = {}; companyFilter.kind = ''; companyFilter.status = ''; companyFilter.limit = COMPANY_PAGE; renderCompanies(); }
+        function companyColFilterRowHtml() {
+            const f = companyFilter, cols = f.cols || {};
+            const inp = 'w-full min-w-[80px] px-1.5 py-1 text-xs font-normal border border-gray-300 rounded bg-white focus:outline-none focus:ring-1 focus:ring-cyan-500';
+            const on = v => v ? ' border-cyan-500 bg-cyan-50' : '';
+            const text = (key, ph) => `<input type="text" data-ccol="${key}" value="${escapeHtml(cols[key] || '')}" oninput="setCompanyCol('${key}', this.value, true)" placeholder="${ph}" class="${inp}${on(cols[key])}" />`;
+            const sel = (key, val, opts, onch) => `<select ${key ? `data-ccol="${key}"` : ''} onchange="${onch}" class="${inp}${on(val)}"><option value="">전체</option>${opts.map(([v, l]) => `<option value="${escapeHtml(v)}"${val === v ? ' selected' : ''}>${escapeHtml(l)}</option>`).join('')}</select>`;
+            // 상위업체 — 본사 · 파트너사 이름 (등록된 상위업체만)
+            const parents = Array.from(new Set(customers.filter(c => c.kind === 'hq' || c.kind === 'partner').map(c => companyNameOf(c)).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'ko'));
+            const anyOn = f.kind || f.status || Object.values(cols).some(Boolean);
+            return `<tr class="bg-white border-b border-gray-200" onclick="event.stopPropagation()">
+                <th class="px-2 py-1.5">${sel('', f.kind, PARTNER_CUST_TYPES.map(o => [o.id, o.name]), "setCompanyFilter('kind', this.value)")}</th>
+                <th class="px-2 py-1.5">${text('name', '상호')}</th>
+                <th class="px-2 py-1.5">${sel('parent', cols.parent || '', [['__none', '연결 안 됨'], ['__na', '해당 없음']].concat(parents.map(n => [n, n])), "setCompanyCol('parent', this.value)")}</th>
+                <th class="px-2 py-1.5">${text('businessNo', '사업자번호')}</th>
+                <th class="px-2 py-1.5">${text('contact', '담당자')}</th>
+                <th class="px-2 py-1.5">${text('phone', '연락처')}</th>
+                <th class="px-2 py-1.5">${sel('', f.status, PARTNER_STATUS.map(o => [o.id, o.id]), "setCompanyFilter('status', this.value)")}</th>
+                <th class="px-2 py-1.5">${sel('contract', cols.contract || '', COMPANY_CONTRACT_OPTS, "setCompanyCol('contract', this.value)")}</th>
+                <th class="px-2 py-1.5">${sel('ids', cols.ids || '', [['yes', '있음'], ['no', '없음']], "setCompanyCol('ids', this.value)")}</th>
+                <th class="px-2 py-1.5 text-center">${anyOn ? `<button type="button" onclick="clearCompanyCols()" class="px-2 py-1 text-[11px] rounded border border-gray-300 text-gray-600 bg-white hover:bg-gray-50 whitespace-nowrap" title="칸별 거르기 모두 해제"><i class="fas fa-filter-circle-xmark mr-0.5"></i>해제</button>` : '<span class="text-[11px] font-normal text-gray-400"><i class="fas fa-filter"></i></span>'}</th>
+            </tr>`;
+        }
         // 예전 화면 이름으로 부르는 곳이 남아 있어 그대로 이어 줍니다
         function renderPartners() { renderCompanies(); }
 
@@ -41816,7 +41910,7 @@ await fetch('${escapeHtml(url)}', { method: 'POST', headers: { 'Content-Type': '
         // 가입 승인으로 생긴 업체를 업체 관리 [목록] 에서 찾아 보여 줍니다
         function showCompanyInList(id) {
             const c = customers.find(x => x.id === id);
-            companyFilter = { q: c ? companyNameOf(c) : '', kind: '', status: '', view: 'list', limit: COMPANY_PAGE };
+            companyFilter = { q: c ? companyNameOf(c) : '', kind: '', status: '', view: 'list', limit: COMPANY_PAGE, cols: {} };
             renderCompanies();
         }
         // 가입 신청 기록 삭제 — 관리자만 (2026-10-16). 승인으로 만들어진 업체 · 아이디는 그대로 둡니다.
@@ -41923,6 +42017,7 @@ await fetch('${escapeHtml(url)}', { method: 'POST', headers: { 'Content-Type': '
                                     <th class="px-3 py-2 font-medium text-center whitespace-nowrap">아이디</th>
                                     <th class="px-3 py-2 font-medium text-center whitespace-nowrap">관리</th>
                                 </tr>
+                                ${companyColFilterRowHtml()}
                             </thead>
                             <tbody class="text-gray-700">${rowsHtml}</tbody>
                         </table>
