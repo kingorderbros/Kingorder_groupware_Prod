@@ -46,6 +46,10 @@
 
     const cache = new Map();          // key → 문자열(JSON) — Supabase 모드에서만 씁니다
     const synced = new Map();         // key → 마지막으로 서버와 맞춘 값(문자열) — 저장할 때 '내가 바꾼 건' 을 가려내는 기준
+    // key → 화면이 마지막으로 읽거나 쓴 값 (2026-10-28 구조 점검)
+    //   실시간으로 남의 변경이 오면 synced 는 바로 새 값이 되지만, 창(모달)을 열어 둔 화면의 목록은 아직 예전 값입니다.
+    //   그 상태로 저장하면 '서버 = synced' 라 합치기를 건너뛰고 남이 넣은 항목을 덮었습니다 → 합치기 기준을 화면이 본 값으로.
+    const seen = new Map();
     let client = null;                // supabase-js 클라이언트
     let mode = 'local';
     const pending = new Map();        // key → 값(또는 null=삭제) — 모아 보낼 쓰기
@@ -143,6 +147,21 @@
         if (!hit) return v;
         return JSON.stringify(sh.wrap ? Object.assign({}, sh.wrap, { records: sh.list }) : sh.list);
     }
+    // 데이터베이스가 권한 없는 저장을 막은 것인가 (schema-v8 — 직원 명단 · 권한 그룹 등의 권한 칸)
+    function isDenied(err) { return !!err && (err.code === '42501' || /KOB_PRIV/.test(String(err.message || ''))); }
+    // 막힌 키 — 화면 값을 서버 값으로 되돌리고 알립니다 (다시 보내지 않음 · 2026-10-28)
+    function denyKey(key, err) {
+        pending.delete(key);
+        const back = synced.has(key) ? synced.get(key) : null;
+        const oldValue = cache.get(key) ?? null;
+        if (back === null) cache.delete(key); else cache.set(key, back);
+        if (back !== null) ls.set(key, back);
+        seen.delete(key);
+        const msg = String((err && err.message) || '').replace(/^.*KOB_PRIV:\s*/, '');
+        console.warn('[kob-store] 권한이 없어 저장하지 않았습니다 —', key, msg);
+        try { window.dispatchEvent(new CustomEvent('kob-store-denied', { detail: { key, message: msg } })); } catch (e) { /* 옛 브라우저 */ }
+        try { window.dispatchEvent(new StorageEvent('storage', { key, oldValue, newValue: back, storageArea: window.localStorage })); } catch (e) { /* 새로고침으로 */ }
+    }
     let flushing = false;
     async function flush() {
         flushTimer = null;
@@ -165,8 +184,10 @@
                 if (e1) throw e1;
                 const serverStr = row ? toStr(row.value) : null;
                 let out = v;
-                if (serverStr !== null && serverStr !== synced.get(key)) {
-                    const merged = mergeLists(synced.has(key) ? synced.get(key) : null, v, serverStr, key);
+                // 화면이 본 값 기준 — 번호를 바꿔 둔 항목(겹친 새 번호)은 기준에서도 같은 번호로 봅니다
+                const base = seen.has(key) ? applyRenames(key, seen.get(key)) : (synced.has(key) ? synced.get(key) : null);
+                if (serverStr !== null && serverStr !== base) {
+                    const merged = mergeLists(base, v, serverStr, key);
                     if (merged !== null) {
                         out = merged.str;
                         const ks = Object.keys(merged.renamed);
@@ -174,8 +195,10 @@
                     }
                 }
                 const { error: e2 } = await client.from('app_store').upsert([{ key, value: safeJson(out), updated_at: new Date().toISOString() }], { onConflict: 'key' });
+                if (e2 && isDenied(e2)) { denyKey(key, e2); continue; }      // 권한 없는 저장 — 되돌리고 다시 보내지 않음 (schema-v8)
                 if (e2) throw e2;
                 synced.set(key, out);
+                if (!pending.has(key)) seen.set(key, orig);   // 화면은 아직 자기가 쓴 값을 들고 있습니다 — 합친 값은 화면이 다시 읽을 때(getItem) 기준이 됩니다
                 // 합친 결과가 내 화면 값과 다르면(남의 변경이 들어왔으면) 화면에 알립니다 — 그사이 새로 쓴 값은 건드리지 않음
                 if (out !== orig && cache.get(key) === orig && !pending.has(key)) {
                     cache.set(key, out); ls.set(key, out);
@@ -183,10 +206,25 @@
                 }
             }
             if (plain.length) {
-                const { error } = await client.from('app_store').upsert(plain, { onConflict: 'key' }); if (error) throw error;
-                plain.forEach(r => synced.set(r.key, toStr(r.value)));
+                const { error } = await client.from('app_store').upsert(plain, { onConflict: 'key' });
+                if (error && isDenied(error)) {
+                    // 함께 보낸 것 중 하나가 막혔습니다 — 하나씩 다시 보내 막힌 것만 되돌립니다
+                    for (const r of plain) {
+                        const { error: e3 } = await client.from('app_store').upsert([r], { onConflict: 'key' });
+                        if (e3 && isDenied(e3)) denyKey(r.key, e3);
+                        else if (e3) throw e3;
+                        else synced.set(r.key, toStr(r.value));
+                    }
+                } else {
+                    if (error) throw error;
+                    plain.forEach(r => synced.set(r.key, toStr(r.value)));
+                }
             }
-            if (dels.length) { const { error } = await client.from('app_store').delete().in('key', dels); if (error) throw error; dels.forEach(k => synced.delete(k)); }
+            if (dels.length) {
+                const { error } = await client.from('app_store').delete().in('key', dels);
+                if (error && isDenied(error)) dels.forEach(k => denyKey(k, error));
+                else { if (error) throw error; dels.forEach(k => synced.delete(k)); }
+            }
             setStatus('ok');
         } catch (e) {
             console.error('[kob-store] 저장 실패 — 다시 시도합니다', e);
@@ -219,7 +257,9 @@
     window.kobStorage = {
         getItem(k) {
             if (mode === 'local' || isLocalOnly(k)) return ls.get(k);
-            return cache.has(k) ? cache.get(k) : null;
+            const v = cache.has(k) ? cache.get(k) : null;
+            if (v !== null) seen.set(k, v);
+            return v;
         },
         setItem(k, v) {
             const s = String(v);
@@ -228,6 +268,7 @@
             // 내용이 같으면 보내지 않습니다 — 화면을 그릴 때마다 저장하는 곳(예: 파트너사 목록)이 있어
             // 같은 값을 통째로 다시 올리면 그사이 남이 고친 것을 덮을 수 있습니다 (2026-09-28)
             if (cache.get(k) === s && !pending.has(k)) return;
+            if (!pending.has(k) && !seen.has(k) && synced.has(k)) seen.set(k, synced.get(k));   // 읽지 않고 바로 쓰는 화면 — 서버에서 받은 값이 기준
             cache.set(k, s); ls.set(k, s);            // 로컬에도 사본 (오프라인 · 새로고침 직후 대비)
             if (!canPush(k)) { holdAnon(k); return; }
             pending.set(k, s); scheduleFlush();
