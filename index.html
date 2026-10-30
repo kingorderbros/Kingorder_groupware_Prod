@@ -8535,6 +8535,12 @@
                     <h3 id="quote-modal-title" class="text-lg font-bold text-gray-800">신규 견적 작성</h3>
                     <span id="quote-modal-number" class="text-sm font-mono text-gray-400"></span>
                 </div>
+                <!-- 저장한 견적 불러오기 (영업본부 보완 2026-10-30) — 새 견적을 쓸 때 예전 견적의 품목 · 조건을 그대로 가져와 고칩니다 -->
+                <div id="quote-load-wrap" class="mb-3 flex flex-wrap items-center gap-2 text-sm">
+                    <span class="text-gray-500"><i class="fas fa-folder-open mr-1"></i>저장한 견적 불러오기</span>
+                    <select id="quote-load-select" class="flex-1 min-w-[220px] p-1.5 border border-gray-300 rounded bg-white text-sm"></select>
+                    <button type="button" onclick="loadQuoteIntoDraft(document.getElementById('quote-load-select').value)" class="px-3 py-1.5 rounded border border-blue-300 text-blue-700 bg-white hover:bg-blue-50 text-sm">불러오기</button>
+                </div>
                 <form id="quote-form" onsubmit="submitQuote(event)">
                     <input type="hidden" id="edit-quote-id" value="" />
 
@@ -39544,6 +39550,125 @@ await fetch('${escapeHtml(url)}', { method: 'POST', headers: { 'Content-Type': '
             return out;
         }
 
+        // ==================== 프랜차이즈 장비단가 (영업본부 보완 2026-10-30) ====================
+        // '인수인계_브랜드별 장비단가' 엑셀을 올리면 브랜드마다 사전 협의된 장비 · 금액을 저장합니다.
+        // 파트너센터에서 그 본사 · 가맹점이 장비를 고를 때 **자기 브랜드 장비만** 이 단가로 나옵니다 (서버가 골라 보냄).
+        //   엑셀 칸: 브랜드명 · PG/VAN · 프로그램 · 장비구분 · 장비 상세 · 본사 단가 · 가맹점 단가 · AS 유지보수 · 특이사항 · 본사 페이백
+        //   금액 칸은 '850,000원 / 월 30,000원' 처럼 적혀 있어 일시금 · 월 금액으로 나눠 읽습니다. 가맹점 단가가 있으면 그것을, 없으면 본사 단가를 씁니다.
+        const FRANCHISE_PRICE_KEY = 'gwFranchisePrices.v1';
+        let franchisePriceDraft = null;
+        function franchiseMoney(text) {
+            const t = String(text || '').replace(/\s+/g, ' ');
+            const won = (str) => { const m = String(str || '').match(/([0-9][0-9,]*)\s*원?/); return m ? Number(m[1].replace(/,/g, '')) : 0; };
+            const parts = t.split('/');
+            let price = 0, monthly = 0;
+            parts.forEach(pt => { if (/월/.test(pt)) monthly = monthly || won(pt.replace(/.*월/, '')); else price = price || won(pt.split('>').pop()); });   // '205,000원 > 200,000원' 처럼 고친 값은 뒤엣것
+            return { price, monthly };
+        }
+        function parseFranchisePriceRows(rows) {
+            const brands = [];
+            let cur = null, lastCat = '';
+            (rows || []).slice(1).forEach(r => {
+                const c = i => String((r || [])[i] == null ? '' : r[i]).trim();
+                if (!c(0) && !c(3) && !c(4) && !c(5) && !c(6)) return;
+                if (c(0)) { cur = { brand: c(0).replace(/\s+/g, ' '), van: c(1), program: c(2).replace(/\s*\n\s*/g, ' / '), hqId: '', items: [] }; brands.push(cur); lastCat = ''; }
+                if (!cur) return;
+                if (!c(3) && !c(4) && !c(5) && !c(6) && !c(7) && !c(8)) return;   // 브랜드 이름만 있는 줄 (예: '주요 나가는 장비')
+                const cat = c(3) || lastCat; lastCat = cat;
+                const src = c(6) || c(5);
+                const m = franchiseMoney(src);
+                cur.items.push({ cat: cat.replace(/\s+/g, ' '), model: c(4).replace(/\s+/g, ' '), hqText: c(5), shopText: c(6),
+                                 price: m.price, monthly: m.monthly, asText: c(7), note: c(8), payback: c(9) });
+            });
+            return brands;
+        }
+        const franchiseHqCompanies = () => partners.filter(c => c && (c.kind === 'hq' || c.custType === 'hq'));
+        const franchiseNameKey = (v) => String(v || '').replace(/\s+/g, '').replace(/\(주\)|（주）|㈜|주식회사/g, '').replace(/[()（）]/g, '').toLowerCase();
+        function franchiseAutoMatch(brand) {
+            const k = franchiseNameKey(brand.brand.split('>').pop());
+            const hit = franchiseHqCompanies().find(c => franchiseNameKey(c.name) === k)
+                || franchiseHqCompanies().find(c => { const n = franchiseNameKey(c.name); return n && k && (n.includes(k) || k.includes(n)); });
+            return hit ? hit.id : '';
+        }
+        function openFranchisePriceModal() {
+            const saved = loadJsonStore(FRANCHISE_PRICE_KEY, null);
+            franchisePriceDraft = saved && Array.isArray(saved.brands) ? JSON.parse(JSON.stringify(saved)) : null;
+            let m = document.getElementById('franchise-price-modal');
+            if (!m) {
+                m = document.createElement('div');
+                m.id = 'franchise-price-modal';
+                m.className = 'hidden fixed inset-0 bg-black/50 z-[70] flex items-center justify-center p-4';
+                m.addEventListener('click', (e) => { if (e.target === m) m.classList.add('hidden'); });
+                document.body.appendChild(m);
+            }
+            renderFranchisePriceModal();
+            m.classList.remove('hidden');
+        }
+        function renderFranchisePriceModal() {
+            const m = document.getElementById('franchise-price-modal');
+            if (!m) return;
+            const d = franchisePriceDraft;
+            const hqs = franchiseHqCompanies();
+            const won = v => v ? Number(v).toLocaleString('ko-KR') : '';
+            m.innerHTML = `<div class="bg-white rounded-lg shadow-xl w-full max-w-5xl max-h-[88vh] flex flex-col">
+                <div class="px-5 py-3 border-b border-gray-200 flex items-center justify-between gap-2">
+                    <h3 class="text-base font-bold text-gray-800"><i class="fas fa-store text-violet-600 mr-1"></i>프랜차이즈 장비단가</h3>
+                    <button type="button" onclick="document.getElementById('franchise-price-modal').classList.add('hidden')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+                </div>
+                <div class="px-5 py-3 border-b border-gray-100 text-sm text-gray-600 space-y-2" data-drop-input="franchise-price-file">
+                    <p>브랜드별 장비단가 엑셀(예: 인수인계_브랜드별 장비단가_251020.xlsx)을 올리면, 파트너센터에서 그 프랜차이즈 본사 · 가맹점이 장비를 고를 때 <b>그 브랜드의 사전 협의 장비와 금액</b>만 나옵니다. 다른 브랜드 단가는 보이지 않습니다.</p>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <input type="file" id="franchise-price-file" accept=".xlsx" onchange="onFranchisePriceFile(this)" class="text-sm" />
+                        ${d ? `<span class="text-xs text-gray-500">${escapeHtml(d.sourceFile || '')} · 브랜드 ${d.brands.length}곳 · 장비 ${d.brands.reduce((n, b) => n + b.items.length, 0)}줄${d.savedAt ? ' · 저장 ' + escapeHtml(d.savedAt) : ' · 저장 전'}</span>` : '<span class="text-xs text-gray-400">아직 올린 엑셀이 없습니다.</span>'}
+                    </div>
+                </div>
+                <div class="flex-1 overflow-y-auto px-5 py-3">
+                    ${d ? d.brands.map((b, bi) => `<details class="mb-2 border border-gray-200 rounded">
+                        <summary class="px-3 py-2 cursor-pointer flex flex-wrap items-center gap-2 text-sm">
+                            <b class="text-gray-800">${escapeHtml(b.brand)}</b>
+                            <span class="text-xs text-gray-500">${escapeHtml([b.van, b.program].filter(Boolean).join(' · '))} · 장비 ${b.items.length}줄</span>
+                            <span class="ml-auto flex items-center gap-1 text-xs" onclick="event.stopPropagation()">연결 본사
+                                <select onchange="franchisePriceDraft.brands[${bi}].hqId=this.value" class="p-1 border ${b.hqId ? 'border-gray-300' : 'border-amber-400 bg-amber-50'} rounded text-xs">
+                                    <option value="">이름으로 찾기 (연결 안 함)</option>
+                                    ${hqs.map(c => `<option value="${escapeHtml(c.id)}"${b.hqId === c.id ? ' selected' : ''}>${escapeHtml(c.name)}</option>`).join('')}
+                                </select></span>
+                        </summary>
+                        <table class="w-full text-xs border-t border-gray-100">
+                            <thead><tr class="bg-gray-50 text-gray-500"><th class="p-1.5 text-left">장비구분</th><th class="p-1.5 text-left">모델 · 규격</th><th class="p-1.5 text-right">적용 단가</th><th class="p-1.5 text-right">월</th><th class="p-1.5 text-left">본사 단가 / 가맹점 단가 (원문)</th><th class="p-1.5 text-left">AS · 특이사항</th></tr></thead>
+                            <tbody>${b.items.map(it => `<tr class="border-t border-gray-50"><td class="p-1.5">${escapeHtml(it.cat)}</td><td class="p-1.5">${escapeHtml(it.model)}</td>
+                                <td class="p-1.5 text-right">${won(it.price)}</td><td class="p-1.5 text-right">${won(it.monthly)}</td>
+                                <td class="p-1.5 text-gray-500">${escapeHtml([it.hqText, it.shopText].filter(Boolean).join(' / '))}</td>
+                                <td class="p-1.5 text-gray-500">${escapeHtml([it.asText, it.note].filter(Boolean).join(' · '))}</td></tr>`).join('')}</tbody>
+                        </table>
+                    </details>`).join('') : '<p class="text-sm text-gray-400 py-8 text-center">엑셀을 올려 주세요.</p>'}
+                </div>
+                <div class="px-5 py-3 border-t border-gray-200 flex justify-end gap-2">
+                    <button type="button" onclick="document.getElementById('franchise-price-modal').classList.add('hidden')" class="px-4 py-2 text-sm rounded bg-gray-200 text-gray-700 hover:bg-gray-300">닫기</button>
+                    ${d ? '<button type="button" onclick="saveFranchisePrices()" class="px-4 py-2 text-sm rounded bg-violet-600 text-white hover:bg-violet-700">저장</button>' : ''}
+                </div>
+            </div>`;
+        }
+        async function onFranchisePriceFile(input) {
+            const file = (input.files || [])[0];
+            if (!file) return;
+            try {
+                const brands = parseFranchisePriceRows(await readXlsxRows(file)).filter(b => b.items.length);
+                if (!brands.length) { alert('엑셀에서 브랜드를 찾지 못했습니다. 첫 줄이 제목(브랜드명 · PG/VAN · 프로그램 · 장비구분 …)인지 확인해 주세요.'); return; }
+                const prev = {};
+                ((franchisePriceDraft || {}).brands || []).forEach(b => { if (b.hqId) prev[b.brand] = b.hqId; });
+                brands.forEach(b => { b.hqId = prev[b.brand] || franchiseAutoMatch(b); });
+                franchisePriceDraft = { version: 1, sourceFile: file.name, brands };
+                renderFranchisePriceModal();
+            } catch (e) { alert('엑셀을 읽지 못했습니다.\n\n· ' + (e && e.message ? e.message : e)); }
+        }
+        function saveFranchisePrices() {
+            if (!franchisePriceDraft) return;
+            franchisePriceDraft.savedAt = ymd(new Date());
+            franchisePriceDraft.savedBy = currentUserName || '';
+            saveJsonStore(FRANCHISE_PRICE_KEY, franchisePriceDraft);
+            renderFranchisePriceModal();
+            showAppToast(`프랜차이즈 장비단가를 저장했습니다 (브랜드 ${franchisePriceDraft.brands.length}곳).`, 'blue');
+        }
         function renderPriceBook() {
             savePriceBook();
             const host = document.getElementById('sec-common-price');
@@ -39599,6 +39724,7 @@ await fetch('${escapeHtml(url)}', { method: 'POST', headers: { 'Content-Type': '
                     <div class="flex flex-wrap gap-2">
                         <button onclick="openPriceModal()" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded text-sm transition-colors whitespace-nowrap"><i class="fas fa-plus mr-1"></i>단가 등록</button>
                         <button onclick="togglePriceImport()" class="bg-white border border-green-600 text-green-700 hover:bg-green-50 px-3 py-1.5 rounded text-sm transition-colors whitespace-nowrap"><i class="fas fa-file-arrow-up mr-1"></i>엑셀 업로드</button>
+                        <button onclick="openFranchisePriceModal()" class="bg-white border border-violet-500 text-violet-700 hover:bg-violet-50 px-3 py-1.5 rounded text-sm transition-colors whitespace-nowrap"><i class="fas fa-store mr-1"></i>프랜차이즈 장비단가</button>
                         <button onclick="downloadPriceXlsx()" class="bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded text-sm transition-colors whitespace-nowrap"><i class="fas fa-file-excel mr-1"></i>엑셀 다운로드</button>
                     </div>
                 </div>
@@ -46894,8 +47020,10 @@ await fetch('${escapeHtml(url)}', { method: 'POST', headers: { 'Content-Type': '
         }
         // 정가 소계 (단가 열 기준)
         function quoteSubtotal(q) {
-            return ((q || {}).lines || []).reduce((sum, l) => sum + quoteLineSubtotal(l), 0);
+            return quoteCountedLines(q).reduce((sum, l) => sum + quoteLineSubtotal(l), 0);
         }
+        // 선택사항 품목 (영업본부 보완 2026-10-30) — 견적서에 보여 주되 합계 금액에서는 뺍니다
+        function quoteCountedLines(q) { return ((q || {}).lines || []).filter(l => !(l && l.optional)); }
         // ---------- 견적 할인 ----------
         // 할인은 넣을 수도, 안 넣을 수도 있습니다. **체크했을 때만** 할인율을 받고 합계에도 그때만 나옵니다.
         //   q.discountUse   — 할인 적용 여부
@@ -46949,6 +47077,8 @@ await fetch('${escapeHtml(url)}', { method: 'POST', headers: { 'Content-Type': '
         //   l.discounts = { cash, rental, installment } — 방식마다 따로 줄 수 있습니다.
         //   예전 견적은 할인율이 하나(l.discount)뿐이라 그 값을 세 방식에 그대로 씁니다.
         //   lineOn=false 면 품목 할인을 쓰지 않습니다 (전체 금액 할인 모드이거나 할인을 끈 경우)
+        // 품목 할인 단위 (영업본부 보완 2026-10-30) — '%'(정률 · 기본) 또는 '원'(정액). 줄마다 고를 수 있습니다
+        const quoteLineDiscUnit = (l) => ((l || {}).discUnit === 'won' ? 'won' : 'rate');
         function quoteLineDiscountFor(l, colId, lineOn) {
             if (lineOn === false) return 0;
             const d = (l || {}).discounts;
@@ -46960,12 +47090,18 @@ await fetch('${escapeHtml(url)}', { method: 'POST', headers: { 'Content-Type': '
         //   현금가를 비워 두면 '수량 × 단가'(정가) 를 할인 전 금액으로 씁니다.
         function quoteLineTypeAmount(l, colId, lineOn) {
             const gross = quoteCellEmpty(l[colId]) ? (colId === 'cash' ? quoteLineSubtotal(l) : 0) : (Number(l[colId]) || 0);
+            if (quoteLineDiscUnit(l) === 'won') {
+                // 정액 할인 — 그 방식의 금액에서 적은 금액만큼 뺍니다 (금액보다 크게 빼지는 않습니다)
+                if (lineOn === false) return gross;
+                const won = Math.max(0, Number(((l || {}).discWon || {})[colId]) || 0);
+                return Math.max(0, gross - won);
+            }
             return gross * (1 - quoteLineDiscountFor(l, colId, lineOn) / 100);
         }
         // 열 하나의 소계 (부가세 별도)
         function quoteColSubtotal(q, colId) {
             if (colId === 'amount') return quoteSubtotal(q);
-            const lines = ((q || {}).lines || []);
+            const lines = quoteCountedLines(q);
             const on = quoteLineDiscountOn(q);
             const anyFilled = lines.some(l => !quoteCellEmpty(l[colId]));
             if (!anyFilled && colId !== 'cash') {
@@ -46979,7 +47115,7 @@ await fetch('${escapeHtml(url)}', { method: 'POST', headers: { 'Content-Type': '
         // 할인을 걸기 **전** 열 소계 (품목 할인도 빼기 전)
         function quoteColSubtotalGross(q, colId) {
             if (colId === 'amount') return quoteSubtotal(q);
-            const lines = ((q || {}).lines || []);
+            const lines = quoteCountedLines(q);
             const anyFilled = lines.some(l => !quoteCellEmpty(l[colId]));
             if (!anyFilled && colId !== 'cash') return quoteColSubtotal(q, colId);   // 예전 자료 되짚기 경로
             return lines.reduce((sum, l) => sum + quoteLineTypeAmount(l, colId, false), 0);
@@ -47584,10 +47720,13 @@ await fetch('${escapeHtml(url)}', { method: 'POST', headers: { 'Content-Type': '
                 ? `<tr><td colspan="${span}" class="p-3 text-center text-gray-400 text-xs">품목을 추가해 주세요.</td></tr>`
                 : quoteDraftLines.map((l, i) => `
                     <tr class="border-b border-gray-100">
-                        <td class="p-2"><input type="text" value="${escapeHtml(l.name)}" oninput="updateQuoteLine(${i}, 'name', this.value)" class="w-full p-1 border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-500" placeholder="품목명" /></td>
+                        <td class="p-2"><label class="flex items-center gap-1 text-[11px] text-gray-500 mb-0.5 cursor-pointer" title="선택사항은 견적서에 표시되지만 합계 금액에서 빠집니다"><input type="checkbox" ${l.optional ? 'checked' : ''} onchange="updateQuoteLine(${i}, 'optional', this.checked)" class="w-3 h-3" />선택사항</label><input type="text" value="${escapeHtml(l.name)}" oninput="updateQuoteLine(${i}, 'name', this.value)" class="w-full p-1 border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-500" placeholder="품목명" /></td>
                         <td class="p-2"><input type="number" min="0" value="${l.qty}" oninput="updateQuoteLine(${i}, 'qty', this.value)" class="w-full p-1 border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 text-center" /></td>
                         <td class="p-2"><input type="number" min="0" value="${l.price}" oninput="updateQuoteLine(${i}, 'price', this.value)" class="w-full p-1 border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 text-right" /></td>
-                        ${cols.map(c => (dOn ? `<td class="p-2"><input type="number" min="0" max="100" step="0.1" value="${quoteLineDiscountFor(l, c.id, true)}" oninput="updateQuoteLine(${i}, 'disc-${c.id}', this.value)" class="w-full p-1 border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 text-center" /></td>` : '')
+                        ${cols.map((c, ci) => (dOn ? `<td class="p-2"><div class="flex items-center gap-1">${quoteLineDiscUnit(l) === 'won'
+                                ? `<input type="number" min="0" step="1000" value="${Number(((l.discWon || {})[c.id])) || 0}" oninput="updateQuoteLine(${i}, 'discwon-${c.id}', this.value)" class="w-full min-w-[64px] p-1 border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 text-right" />`
+                                : `<input type="number" min="0" max="100" step="0.1" value="${quoteLineDiscountFor(l, c.id, true)}" oninput="updateQuoteLine(${i}, 'disc-${c.id}', this.value)" class="w-full min-w-[44px] p-1 border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 text-center" />`}
+                                ${ci === 0 ? `<select onchange="updateQuoteLine(${i}, 'discUnit', this.value)" title="할인 방식 — %(정률) 또는 원(정액)" class="p-1 border border-gray-200 rounded text-xs bg-white"><option value="rate"${quoteLineDiscUnit(l) === 'rate' ? ' selected' : ''}>%</option><option value="won"${quoteLineDiscUnit(l) === 'won' ? ' selected' : ''}>원</option></select>` : `<span class="text-xs text-gray-400">${quoteLineDiscUnit(l) === 'won' ? '원' : '%'}</span>`}</div></td>` : '')
                             + `<td class="p-2"><input type="number" id="quote-line-${c.id}-${i}" min="0" value="${quoteCellEmpty(l[c.id]) ? '' : l[c.id]}" oninput="updateQuoteLine(${i}, ${jsArg(c.id)}, this.value)" placeholder="${c.id === 'cash' ? formatKRW(quoteLineSubtotal(l)) : c.ph}" class="w-full p-1 border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 text-right" /></td>`).join('')}
                         <td class="p-2"><input type="text" value="${escapeHtml(l.note || '')}" oninput="updateQuoteLine(${i}, 'note', this.value)" class="w-full p-1 border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-500" placeholder="비고" /></td>
                         <td class="p-2 text-center"><button type="button" onclick="removeQuoteLine(${i})" class="text-red-400 hover:text-red-600" title="삭제"><i class="fas fa-times-circle"></i></button></td>
@@ -47599,7 +47738,7 @@ await fetch('${escapeHtml(url)}', { method: 'POST', headers: { 'Content-Type': '
                             <th class="p-2 text-left font-medium" style="min-width:140px">품목</th>
                             <th class="p-2 text-center font-medium" style="width:64px">수량</th>
                             <th class="p-2 text-right font-medium" style="width:120px">단가(₩)<span class="block text-[10px] font-normal text-gray-400">정가 = 수량×단가</span></th>
-                            ${cols.map(c => (dOn ? `<th class="p-2 text-center font-medium ${c.cls}" style="width:66px">할인(%)<span class="block text-[10px] font-normal text-gray-400">${c.label.replace('가', '')}</span></th>` : '')
+                            ${cols.map(c => (dOn ? `<th class="p-2 text-center font-medium ${c.cls}" style="width:112px">할인(% · 원)<span class="block text-[10px] font-normal text-gray-400">${c.label.replace('가', '')}</span></th>` : '')
                                 + `<th class="p-2 text-right font-medium ${c.cls}" style="width:116px">${c.label}${c.monthly ? '<span class="block text-[10px] font-normal text-gray-400">월</span>' : ''}</th>`).join('')}
                             <th class="p-2 text-left font-medium" style="min-width:100px">비고</th>
                             <th class="p-2 text-center font-medium" style="width:36px"></th>
@@ -47624,6 +47763,15 @@ await fetch('${escapeHtml(url)}', { method: 'POST', headers: { 'Content-Type': '
             const l = quoteDraftLines[index];
             if (!l) return;
             if (field === 'name' || field === 'note') { l[field] = value; return; }
+            // 선택사항 · 할인 방식은 칸 모양이 바뀌므로 표를 다시 그립니다 (2026-10-30)
+            if (field === 'optional') { l.optional = !!value; renderQuoteLines(); return; }
+            if (field === 'discUnit') { l.discUnit = value === 'won' ? 'won' : 'rate'; renderQuoteLines(); return; }
+            if (field.indexOf('discwon-') === 0) {
+                if (!l.discWon) l.discWon = {};
+                l.discWon[field.slice(8)] = Math.max(0, Number(value) || 0);
+                recalcQuoteTotals();
+                return;
+            }
             if (field.indexOf('disc-') === 0) {
                 // 방식별 품목 할인율 (disc-cash · disc-rental · disc-installment)
                 const key = field.slice(5);
@@ -47743,7 +47891,7 @@ await fetch('${escapeHtml(url)}', { method: 'POST', headers: { 'Content-Type': '
                 quoteDraftTerms = quoteTermsOf(q);
             } else {
                 document.getElementById('quote-modal-title').innerText = '신규 견적 작성';
-                document.getElementById('quote-modal-number').innerText = '';
+                document.getElementById('quote-modal-number').innerText = quoteNextId() + ' (저장 시 확정)';
                 document.getElementById('edit-quote-id').value = '';
                 document.getElementById('quote-status').value = '초안';
                 document.getElementById('quote-discount-use').checked = false;
@@ -47766,7 +47914,29 @@ await fetch('${escapeHtml(url)}', { method: 'POST', headers: { 'Content-Type': '
             renderQuoteTerms();
             // 할인 체크·방식에 맞춰 칸을 펴거나 접고 합계를 다시 계산합니다
             onQuoteDiscountToggle();
+            // 저장한 견적 불러오기 — 새 견적일 때만 (2026-10-30)
+            const loadWrap = document.getElementById('quote-load-wrap');
+            if (loadWrap) {
+                loadWrap.classList.toggle('hidden', !!quoteId || !quotes.length);
+                const sel = document.getElementById('quote-load-select');
+                if (sel) sel.innerHTML = '<option value="">견적을 선택하세요</option>' + quotes.slice()
+                    .sort((a, b) => String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || '')))
+                    .map(q => `<option value="${escapeHtml(q.id)}">${escapeHtml(q.id)} · ${escapeHtml(q.name || '')} · ${escapeHtml((getQuoteCustomerInfo(q) || {}).name || '')}</option>`).join('');
+            }
             modal.classList.remove('hidden');
+        }
+        // 저장한 견적의 내용(고객 · 품목 · 할인 · 조건 · 결제방식)을 새 견적으로 가져옵니다. 원래 견적은 그대로 남습니다
+        function loadQuoteIntoDraft(id) {
+            if (!id) { alert('불러올 견적을 선택해 주세요.'); return; }
+            if (!quotes.some(q => q.id === id)) return;
+            openQuoteModal(id);
+            document.getElementById('quote-modal-title').innerText = '신규 견적 작성';
+            document.getElementById('quote-modal-number').innerText = quoteNextId() + ' (저장 시 확정) · ' + id + ' 에서 불러옴';
+            document.getElementById('edit-quote-id').value = '';
+            document.getElementById('quote-status').value = '초안';
+            document.getElementById('quote-expiry').value = ymd(new Date(new Date().setDate(new Date().getDate() + 30)));
+            quoteDraftLines = quoteDraftLines.map(l => JSON.parse(JSON.stringify(l)));
+            const wrap = document.getElementById('quote-load-wrap'); if (wrap) wrap.classList.add('hidden');
         }
 
         // 고객사 선택 변경 시: '직접 입력' 선택하면 수동 입력 필드 표시
@@ -47985,6 +48155,8 @@ await fetch('${escapeHtml(url)}', { method: 'POST', headers: { 'Content-Type': '
         }
 
 
+        // 다음 견적번호 — 저장 전 견적서에도 번호를 미리 적어 둡니다 (영업본부 보완 2026-10-30). 저장하면 이 번호가 붙습니다
+        function quoteNextId() { return 'QT-' + String(quoteIdCounter).padStart(4, '0'); }
         function buildQuoteDocHtml(q) {
             const customer = getQuoteCustomerInfo(q);
             const supplier = getQuoteSupplier(q);
@@ -48000,11 +48172,11 @@ await fetch('${escapeHtml(url)}', { method: 'POST', headers: { 'Content-Type': '
             const docCols = 4 + docAmtCols.length * (docDOn ? 2 : 1);
             const docPad = docCompact ? 'py-1.5 px-1.5' : 'py-2 px-2';
             const lineRows = (q.lines || []).map((l, i) => `
-                <tr class="border-b border-gray-200">
-                    <td class="${docPad}">${escapeHtml(l.name)}</td>
+                <tr class="border-b border-gray-200${l.optional ? ' text-gray-500' : ''}">
+                    <td class="${docPad}">${escapeHtml(l.name)}${l.optional ? ' <span class="text-[10px] text-gray-500">(선택사항 · 합계 제외)</span>' : ''}</td>
                     <td class="${docPad} text-center whitespace-nowrap">${(Number(l.qty) || 0).toLocaleString('en-US')}</td>
                     <td class="${docPad} text-right whitespace-nowrap">${formatKRW(l.price)}</td>
-                    ${docAmtCols.map(c => (docDOn ? `<td class="${docPad} text-center whitespace-nowrap text-gray-500">${quoteLineDiscountFor(l, c.id, true)}%</td>` : '')
+                    ${docAmtCols.map(c => (docDOn ? `<td class="${docPad} text-center whitespace-nowrap text-gray-500">${quoteLineDiscUnit(l) === 'won' ? formatKRW(Number((l.discWon || {})[c.id]) || 0) : quoteLineDiscountFor(l, c.id, true) + '%'}</td>` : '')
                         + `<td class="${docPad} text-right whitespace-nowrap">${formatKRW(Math.round(quoteLineTypeAmount(l, c.id, docDOn)))}</td>`).join('')}
                     <td class="${docPad} text-gray-600 ${docCompact ? 'text-[11px]' : 'text-xs'} whitespace-pre-line">${escapeHtml(l.note || '')}</td>
                 </tr>
@@ -48022,7 +48194,7 @@ await fetch('${escapeHtml(url)}', { method: 'POST', headers: { 'Content-Type': '
                         <p class="text-sm text-gray-500 mt-2">QUOTATION</p>
                     </div>
                     <div class="text-right text-sm">
-                        <p><span class="text-gray-500">견적번호 </span><span class="font-mono font-medium">${q.id || '(미저장)'}</span>${q.requoteOf ? ` <span class="text-xs text-emerald-600">(재견적)</span>` : ''}</p>
+                        <p><span class="text-gray-500">견적번호 </span><span class="font-mono font-medium">${q.id || quoteNextId()}</span>${q.requoteOf ? ` <span class="text-xs text-emerald-600">(재견적)</span>` : ''}</p>
                         ${q.requoteOf ? `<p class="mt-1 text-xs text-gray-400">원견적: ${escapeHtml(q.requoteOf)}</p>` : ''}
                         <p class="mt-1"><span class="text-gray-500">작성일 </span>${ymd(new Date())}</p>
                         <p class="mt-1"><span class="text-gray-500">유효기간 </span><span class="${expired ? 'text-red-600 font-bold' : ''}">${q.expiry || '-'}${expired ? ' (만료)' : ''}</span></p>
@@ -48141,9 +48313,23 @@ await fetch('${escapeHtml(url)}', { method: 'POST', headers: { 'Content-Type': '
             const printArea = document.getElementById('print-area');
             if (!doc || !printArea) { window.print(); return; }
             printArea.innerHTML = doc.innerHTML;
+            // 견적서 전체가 A4 한 장에 들어가도록 넘치면 비율대로 줄입니다 (영업본부 보완 2026-10-30)
+            //   A4(210×297mm) − 여백 12mm × 2 = 186 × 273mm ≈ 703 × 1032px (96dpi)
+            printArea.style.zoom = '';
+            try {
+                const probe = document.createElement('div');
+                probe.style.cssText = 'position:absolute;left:-10000px;top:0;width:703px;visibility:hidden;background:#fff';
+                probe.innerHTML = doc.innerHTML;
+                document.body.appendChild(probe);
+                const h = probe.scrollHeight;
+                probe.remove();
+                const fit = h > 1020 ? Math.max(0.5, Math.floor(1020 / h * 100) / 100) : 1;
+                if (fit < 1) printArea.style.zoom = String(fit);
+            } catch (e) { /* 재지 못하면 그대로 인쇄합니다 */ }
             document.body.classList.add('printing');
             const cleanup = () => {
                 document.body.classList.remove('printing');
+                printArea.style.zoom = '';
                 printArea.innerHTML = '';
                 window.removeEventListener('afterprint', cleanup);
             };
@@ -55312,10 +55498,11 @@ await fetch('${escapeHtml(url)}', { method: 'POST', headers: { 'Content-Type': '
               placeholder: '000-00-00000' },
             { key: 'shopCeo', label: '대표자명', type: 'text', required: true, noSum: true },
             { key: 'shopBiz', label: '업종 / 업태', type: 'text', required: false, noSum: true,
-              placeholder: '예: 음식점업 / 한식' },
+              placeholder: '예: 음식점업 / 한식', hint: '사업자등록증에 기재된 업종 · 업태를 입력해 주세요.' },
             // 2026-09-16 — '매장 주소' → '주소'. [주소 검색] 으로 우편번호 · 도로명주소를 찾아 채웁니다.
-            { key: 'shopAddr', label: '주소', type: 'address', required: true, noSum: true,
-              placeholder: '도로명 또는 지번 주소' },
+            // 2026-10-30 — 사업자등록증에 등록된 주소로 받습니다 (영업본부 보완)
+            { key: 'shopAddr', label: '사업장 주소 (사업자등록증 기재 주소)', type: 'address', required: true, noSum: true,
+              placeholder: '도로명 또는 지번 주소', hint: '반드시 사업자등록증에 등록된 주소로 기재해 주세요.' },
             { key: 'shopPhone', label: '담당자 휴대폰', type: 'tel', required: true, noSum: true,
               placeholder: '010-0000-0000' }
         ];
@@ -55458,6 +55645,8 @@ await fetch('${escapeHtml(url)}', { method: 'POST', headers: { 'Content-Type': '
             { id: 'card1',  name: '카드 일시불' },
             { id: 'card12', name: '카드 할부' },
             { id: 'paid',   name: '유상임대' },
+            // 렌탈 (영업본부 보완 2026-10-30) — 월 렌탈료 × 개월. 렌탈 품목은 영업본부 접수 화면에 '렌탈 내역' 으로 따로 모아 보여 줍니다
+            { id: 'rental', name: '렌탈' },
             { id: 'free',   name: '무상임대' }
         ];
         // 무상임대 사유 — 계약서 종류가 갈립니다
@@ -55542,8 +55731,17 @@ await fetch('${escapeHtml(url)}', { method: 'POST', headers: { 'Content-Type': '
         // ---------- 유지보수 관리비 CMS 자동이체 신청서 ----------
         // 종이 신청서 항목을 그대로 받습니다. 여기서 받으면 현장에서 다시 받지 않습니다.
         const PARTNER_CMS_ONLY = { key: 'cmsTarget', in: ['yes'] };
-        // 배달연동을 신청하면 월 10,000원이 가산됩니다 (초안 · 종이 양식과 같은 값)
+        // 배달연동을 신청하면 월 10,000원 + 부가세(11,000원)가 가산됩니다 (영업본부 보완 2026-10-30 — 부가세 추가)
         const PARTNER_CMS_DELIVERY_FEE = 10000;
+        const PARTNER_CMS_DELIVERY_FEE_VAT = Math.round(PARTNER_CMS_DELIVERY_FEE * 1.1);
+        // CMS 이용 요금 자동 계산 (영업본부 보완 2026-10-30) — 정책서 기준
+        //   포스 + 키오스크 2대까지 월 10,000원(부가세 포함), 3대째부터 1대마다 월 5,000원 추가.
+        //   발주 장비(STEP 3)를 고르면 따라 바뀌고, 직접 고친 금액은 그대로 둡니다.
+        const PARTNER_CMS_BASE_FEE = 10000, PARTNER_CMS_BASE_UNITS = 2, PARTNER_CMS_EXTRA_FEE = 5000;
+        function partnerCmsAutoFee(vals) {
+            const c = partnerHwDeviceCounts(partnerHwFormRows((vals || {}).hwList));
+            return PARTNER_CMS_BASE_FEE + Math.max(0, c.pos + c.kiosk - PARTNER_CMS_BASE_UNITS) * PARTNER_CMS_EXTRA_FEE;
+        }
         // CMS 출금 은행 — 자주 쓰는 순서. 검색으로 좁혀 고르고, 없는 곳은 그대로 적을 수 있습니다 (2026-09-16)
         const PARTNER_BANKS = [
             'KB국민은행', '신한은행', '우리은행', '하나은행', 'NH농협은행', 'IBK기업은행',
@@ -55555,11 +55753,12 @@ await fetch('${escapeHtml(url)}', { method: 'POST', headers: { 'Content-Type': '
         const PARTNER_CMS_FIELDS = [
             // 2026-10-12 UAT — CMS 청구 대상을 고르면 **이용 요금(월, 기본)을 먼저** 적고, 배달연동은 그 아래에서 고릅니다.
             // 요금 · 배달연동 · 월 청구액을 신청서 머리말(수납업체 정보)보다 위로 올렸습니다.
-            { key: 'cmsFee', label: '이용 요금(월, 기본)', type: 'number', required: true, noSum: true,
-              min: 0, placeholder: '11000', showIf: PARTNER_CMS_ONLY },
+            { key: 'cmsFee', label: '이용 요금(월, 기본 · 부가세 포함)', type: 'number', required: true, noSum: true,
+              min: 0, placeholder: '10000', showIf: PARTNER_CMS_ONLY, autoValue: partnerCmsAutoFee,
+              hint: '포스 · 키오스크 2대까지 월 10,000원, 1대 추가마다 월 5,000원이 자동 계산됩니다 (발주 장비 기준). 금액은 수정할 수 있습니다.' },
             { key: 'cmsDelivery', label: '배달연동 서비스', type: 'radio', required: true, noSum: true,
               reloadFields: true,
-              options: [{ id: 'yes', name: '신청 (월 10,000원 가산)' }, { id: 'no', name: '미신청' }],
+              options: [{ id: 'yes', name: '신청 (월 10,000원 + 부가세 = 11,000원 가산)' }, { id: 'no', name: '미신청' }],
               showIf: PARTNER_CMS_ONLY },
             // 실제 청구액 — 기본 요금에 배달연동을 더한 값이 그대로 빠져나갑니다.
             // 사람이 또 계산해 적게 두면 틀립니다.
@@ -55567,11 +55766,11 @@ await fetch('${escapeHtml(url)}', { method: 'POST', headers: { 'Content-Type': '
               showIf: PARTNER_CMS_ONLY,
               calc: (v) => {
                   const base = partnerNum((v || {}).cmsFee);
-                  const add = String((v || {}).cmsDelivery) === 'yes' ? PARTNER_CMS_DELIVERY_FEE : 0;
+                  const add = String((v || {}).cmsDelivery) === 'yes' ? PARTNER_CMS_DELIVERY_FEE_VAT : 0;
                   const sum = base + add;
                   return { value: sum,
-                           text: sum ? `월 ${partnerWon(sum)}원` : '기본 요금을 입력해 주세요',
-                           note: add ? `기본 ${partnerWon(base)} + 배달연동 ${partnerWon(add)}` : '' };
+                           text: sum ? `월 ${partnerWon(sum)}원 (부가세 포함)` : '기본 요금을 입력해 주세요',
+                           note: add ? `기본 ${partnerWon(base)} + 배달연동 ${partnerWon(PARTNER_CMS_DELIVERY_FEE)} + 부가세 ${partnerWon(add - PARTNER_CMS_DELIVERY_FEE)}` : '' };
               } },
             // 종이 신청서의 머리말과 **수납업체 고정정보** — 받는 값이 아니라 보여 주는 것입니다
             { key: 'cmsHead', label: '유지보수 관리비 CMS자동이체 신청서', type: 'note',
@@ -55584,9 +55783,9 @@ await fetch('${escapeHtml(url)}', { method: 'POST', headers: { 'Content-Type': '
               showIf: PARTNER_CMS_ONLY },
             { key: 'cmsApplicantTel', label: '신청인 연락처', type: 'tel', required: true, noSum: true,
               placeholder: '010-0000-0000', showIf: PARTNER_CMS_ONLY },
+            // 출금일은 매월 10일 고정 — 고르거나 바꿀 수 없습니다 (영업본부 보완 2026-10-30)
             { key: 'cmsDay', label: '출금일', type: 'select', required: true, noSum: true,
-              options: [{ id: '5', name: '5일' }, { id: '10', name: '10일' }, { id: '15', name: '15일' },
-                        { id: '20', name: '20일' }, { id: '25', name: '25일' }],
+              options: [{ id: '10', name: '매월 10일 (고정)' }], hint: 'CMS 출금일은 매월 10일로 고정됩니다.',
               showIf: PARTNER_CMS_ONLY },
             { key: 'cmsRelation', label: '예금주와의 관계', type: 'radio', required: true, noSum: true,
               options: [{ id: 'self', name: '본인' }, { id: 'other', name: '기타(대표자 외)' }],
@@ -55673,7 +55872,7 @@ await fetch('${escapeHtml(url)}', { method: 'POST', headers: { 'Content-Type': '
 
         const PARTNER_SITE_FIELDS = [
             { key: 'siteOpenDate', label: '오픈 예정일', type: 'date', required: false, noSum: true,
-              showIf: { key: 'shopOpen', in: ['new'] } },
+              showIf: { key: 'shopOpen', in: ['new'] }, hint: '신규 오픈 매장은 오픈 예정일과 아래 설치 희망일을 각각 입력해 주세요.' },
             // 유통 건은 설치를 우리가 하지 않으므로 체크리스트를 받지 않습니다
             // 하드웨어 유통(dist)만 빼고 늘 보입니다. 거래 유형 칸이 없는 접수 구분
             // (장비설치의뢰서)에서도 보여야 해서 notIn 을 씁니다. (2026-09-17)
@@ -55727,7 +55926,7 @@ await fetch('${escapeHtml(url)}', { method: 'POST', headers: { 'Content-Type': '
             let margin = null;                       // null 이면 '해당없음'
             if (mode.marginLabel) {
                 if (r.method === 'free') margin = null;
-                else if (r.method === 'paid') {
+                else if (r.method === 'paid' || r.method === 'rental') {
                     // 유상임대 — 월임대료 × 개월 × 0.79 에서 정책단가를 뺀 것이 수수료입니다
                     margin = Math.round(partnerNum(r.resale) * partnerNum(r.months) * 0.79 - price) * qty;
                 } else {
@@ -55735,6 +55934,42 @@ await fetch('${escapeHtml(url)}', { method: 'POST', headers: { 'Content-Type': '
                 }
             }
             return { qty, price, supply, vat, total: supply + vat, margin };
+        }
+
+        // ---------- 포스 · 키오스크 대수 · 설치비 자동 (영업본부 보완 2026-10-30) ----------
+        //   설치비: 포스 1대 100,000원 · 키오스크 1대 200,000원 (부가세 별도). 금액은 고칠 수 있고, 고친 값은 그대로 둡니다.
+        const PARTNER_INSTALL_FEE = { pos: 100000, kiosk: 200000 };
+        // 프랜차이즈 본사 · 가맹점 계정 — STEP 2 를 건너뛰고, 장비는 브랜드 장비단가(설치비 포함)를 씁니다
+        const PARTNER_FRANCHISE_SKIP = { key: 'custType', in: ['hq', 'franchise'] };
+        const partnerUsesFranchisePrices = () => (typeof partnerPriceItems === 'function') && partnerPriceItems().some(x => x && x.franchise);
+        function partnerHwKindOf(r) {
+            const name = String((r && r.item) || '').replace(/\s+/g, '');
+            const cat = String((r && r.cat) || '');
+            if (!name || /설치|유지보수|하부장|모니터|프린터|스캐너|거치대|화물|배송/.test(name)) return '';
+            if (/키오스크|KIOSK/i.test(name) || (cat === '키오스크' && !/스탠드$/.test(name))) return 'kiosk';
+            if (/포스세트|포스\(단품\)|^포스$|POSSET|POS세트|오더포스/i.test(name)) return 'pos';
+            return '';
+        }
+        function partnerHwDeviceCounts(rows) {
+            const c = { pos: 0, kiosk: 0 };
+            (rows || []).forEach(r => { const k = partnerHwKindOf(r); if (k && r.auto !== 'install') c[k] += partnerNum(r.qty); });
+            return c;
+        }
+        function partnerHwApplyAutoInstall(rows) {
+            // 브랜드 장비단가를 쓰는 프랜차이즈는 단가표의 설치비 품목을 고르므로 자동으로 붙이지 않습니다
+            if (partnerUsesFranchisePrices()) {
+                const k = rows.findIndex(r => r.auto === 'install' && !r.autoEdited);
+                if (k > -1) rows.splice(k, 1);
+                return rows;
+            }
+            const c = partnerHwDeviceCounts(rows);
+            const fee = c.pos * PARTNER_INSTALL_FEE.pos + c.kiosk * PARTNER_INSTALL_FEE.kiosk;
+            const note = '자동 계산: ' + [c.pos ? `포스 ${c.pos}대` : '', c.kiosk ? `키오스크 ${c.kiosk}대` : ''].filter(Boolean).join(' · ');
+            const i = rows.findIndex(r => r.auto === 'install');
+            if (!fee) { if (i > -1 && !rows[i].autoEdited) rows.splice(i, 1); return rows; }
+            if (i < 0) rows.push(Object.assign(partnerHwBlankRow(), { item: '설치비', qty: 1, method: 'cash', price: fee, auto: 'install', autoFee: fee, note }));
+            else if (!rows[i].autoEdited) Object.assign(rows[i], { price: fee, autoFee: fee, qty: rows[i].qty || 1, note });
+            return rows;
         }
 
         // ---------- 가맹점 설치환경 체크 그리기 (2026-09-17) ----------
@@ -55828,11 +56063,11 @@ await fetch('${escapeHtml(url)}', { method: 'POST', headers: { 'Content-Type': '
                 const c = partnerHwRowCalc(r, mode);
                 sumSupply += c.supply; sumVat += c.vat; sumTotal += c.total;
                 if (c.margin === null) marginNA = true; else sumMargin += c.margin;
-                const priceEditable = mode.editPrice || r.exception;
+                const priceEditable = mode.editPrice || r.exception || r.auto === 'install';
                 const on = partnerNum(r.qty) > 0;
-                return `<div data-hw-row="${i}" data-hw-cat="${escapeHtml(r.cat || '')}" data-hw-sub="${escapeHtml(r.sub || '')}" data-hw-item="${escapeHtml(r.item || '')}" class="rounded-xl border ${on ? 'border-indigo-200 bg-white' : 'border-gray-200 bg-gray-50/60'} p-3 sm:p-4">
+                return `<div data-hw-row="${i}" data-hw-auto="${escapeHtml(r.auto || '')}" data-hw-autofee="${partnerNum(r.autoFee)}" data-hw-autoedited="${r.autoEdited ? '1' : ''}" data-hw-cat="${escapeHtml(r.cat || '')}" data-hw-sub="${escapeHtml(r.sub || '')}" data-hw-item="${escapeHtml(r.item || '')}" class="rounded-xl border ${on ? 'border-indigo-200 bg-white' : 'border-gray-200 bg-gray-50/60'} p-3 sm:p-4">
                     <div class="flex items-center justify-between gap-2 mb-2">
-                        <span class="text-[11px] font-bold tracking-wide ${on ? 'text-indigo-600' : 'text-gray-400'}">품목 ${i + 1}${on ? '' : ' · 수량 0 (접수 제외)'}</span>
+                        <span class="text-[11px] font-bold tracking-wide ${on ? 'text-indigo-600' : 'text-gray-400'}">품목 ${i + 1}${on ? '' : ' · 수량 0 (접수 제외)'}${r.auto === 'install' ? ` <span class="ml-1 px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 font-semibold">설치비 자동${r.autoEdited ? ' · 수정함' : ''}</span>` : ''}</span>
                         <button type="button" class="text-gray-300 hover:text-red-500 px-1" onclick="partnerHwDelRow(this)" title="품목 삭제"><i class="fas fa-times"></i></button>
                     </div>
                     <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
@@ -55868,7 +56103,7 @@ await fetch('${escapeHtml(url)}', { method: 'POST', headers: { 'Content-Type': '
                         </label>` : ''}
                         ${mode.showResale ? `<label class="block">${lab(escapeHtml(mode.resaleLabel))}
                             <input class="${inp} text-right" data-hw="resale" inputmode="numeric" value="${partnerWon(r.resale)}" placeholder="${escapeHtml(mode.resaleLabel)}" /></label>
-                        ${r.method === 'paid' ? `<label class="block">${lab('임대 개월')}
+                        ${(r.method === 'paid' || r.method === 'rental') ? `<label class="block">${lab(r.method === 'rental' ? '렌탈 개월' : '임대 개월')}
                             <input class="${inp} text-right" data-hw="months" inputmode="numeric" value="${partnerNum(r.months)}" /></label>` : ''}` : ''}
                         <label class="block col-span-2 ${mode.showResale ? 'sm:col-span-4' : 'sm:col-span-2'}">${lab('비고')}
                             <input class="${inp}" data-hw="note" value="${escapeHtml(r.note || '')}" placeholder="비고" /></label>
@@ -56021,6 +56256,14 @@ await fetch('${escapeHtml(url)}', { method: 'POST', headers: { 'Content-Type': '
                     .forEach(k => { const v = get(k); if (v !== undefined) old[k] = v; });
                 const row = Object.assign({ qty: 0, method: 'cash', price: 0, resale: 0, months: 36,
                                             note: '', reason: 'general', exception: false }, old);
+                // 설치비 자동 줄 (2026-10-30) — 금액을 고치면 '수정함' 으로 두고 다시 덮지 않습니다
+                if (tr.getAttribute('data-hw-auto') === 'install') {
+                    row.auto = 'install';
+                    row.autoFee = partnerNum(tr.getAttribute('data-hw-autofee'));
+                    row.autoEdited = tr.getAttribute('data-hw-autoedited') === '1' || (old.price !== undefined && partnerNum(old.price) !== row.autoFee);
+                    row.price = partnerNum(row.price);
+                    return row;
+                }
                 // 카테고리 ↔ 장비 맞추기 (2026-10-07)
                 //   · 목록에 있는 장비를 골랐으면 카테고리를 그 장비 것으로
                 //   · 카테고리를 바꿨는데 장비가 그 카테고리 것이 아니면 장비를 비웁니다 (직접 입력한 이름은 그대로)
@@ -56047,6 +56290,17 @@ await fetch('${escapeHtml(url)}', { method: 'POST', headers: { 'Content-Type': '
                 }
                 return row;
             });
+            if (!light) {
+                partnerHwApplyAutoInstall(rows);
+                // CMS 이용 요금 — 자동 값 그대로였으면 장비에 맞춰 다시 계산합니다 (2026-10-30)
+                if (typeof partnerWizardVals === 'object' && partnerWizardVals) {
+                    const prevAuto = partnerWizardVals.cmsFeeAuto;
+                    const cur = String(partnerWizardVals.cmsFee === undefined ? '' : partnerWizardVals.cmsFee);
+                    const next = partnerCmsAutoFee({ hwList: JSON.stringify(rows) });
+                    if (!cur || (prevAuto !== undefined && partnerNum(cur) === partnerNum(prevAuto)) || (prevAuto === undefined && partnerNum(cur) === PARTNER_CMS_BASE_FEE)) partnerWizardVals.cmsFee = String(next);
+                    partnerWizardVals.cmsFeeAuto = next;
+                }
+            }
             hidden.value = JSON.stringify(rows);
             if (light) { partnerHwRefreshAmounts(box, rows); return; }
             refreshPartnerTypeFields();
@@ -56145,7 +56399,7 @@ await fetch('${escapeHtml(url)}', { method: 'POST', headers: { 'Content-Type': '
             const hw = v.hwList || '';
             const hasAny = partnerHwHasMethod(hw, 'cash') || partnerHwHasMethod(hw, 'card1')
                         || partnerHwHasMethod(hw, 'card12') || partnerHwHasMethod(hw, 'paid')
-                        || partnerHwHasMethod(hw, 'free');
+                        || partnerHwHasMethod(hw, 'rental') || partnerHwHasMethod(hw, 'free');
             const out = [];
             // 무상 장비 지원은 **사는 건이 아니라 넣어 주는** 건입니다.
             // 구매계약서를 받을 일이 없고, 무상임대계약서가 언제나 필요합니다.
@@ -56403,11 +56657,13 @@ await fetch('${escapeHtml(url)}', { method: 'POST', headers: { 'Content-Type': '
                       fields: withStep(1, PARTNER_SALES_GATE_FIELDS)
                           .concat(withStep(9, [PARTNER_BIZ_TYPE_FIELD]))
                           .concat(withStep(1, PARTNER_SHOP_FIELDS))
-                          .concat(withStep(2, PARTNER_NEWSHOP_PAY_FIELDS))
-                          .concat(withStep(2, PARTNER_CMS_FIELDS))
+                          // 프랜차이즈 본사 · 가맹점은 PG/VAN · 프로그램 · CMS 를 사전 협의로 정하므로 STEP 2 를 건너뜁니다 (영업본부 보완 2026-10-30)
+                          .concat(withStep(2, PARTNER_NEWSHOP_PAY_FIELDS.concat(PARTNER_CMS_FIELDS)).map(f => Object.assign(f, { hideIf: PARTNER_FRANCHISE_SKIP })))
                           .concat(withStep(3, PARTNER_HW_FIELDS))
-                          .concat(withStep(4, PARTNER_SITE_FIELDS))
+                          // 오픈 예정일 · 설치 희망일을 나란히 먼저 받습니다 (영업본부 보완 2026-10-30)
+                          .concat(withStep(4, PARTNER_SITE_FIELDS.filter(f => f.key === 'siteOpenDate')))
                           .concat(withStep(4, PARTNER_INSTALL_FIELDS))
+                          .concat(withStep(4, PARTNER_SITE_FIELDS.filter(f => f.key !== 'siteOpenDate')))
                           .concat(withStep(9, PARTNER_AGREE_FIELDS)),
                       // 신규 개설은 PG신청서·TID 캡처가 아직 없으므로 공통 목록을 쓰지 않고
                       // 이 접수만의 목록을 받습니다.
@@ -56488,8 +56744,10 @@ await fetch('${escapeHtml(url)}', { method: 'POST', headers: { 'Content-Type': '
                       fields: withStep(1, PARTNER_SALES_GATE_FIELDS)
                           .concat(withStep(1, PARTNER_DONATE_FIELDS))
                           .concat(withStep(3, PARTNER_HW_FIELDS))
-                          .concat(withStep(4, PARTNER_SITE_FIELDS))
+                          // 오픈 예정일 · 설치 희망일을 나란히 먼저 받습니다 (영업본부 보완 2026-10-30)
+                          .concat(withStep(4, PARTNER_SITE_FIELDS.filter(f => f.key === 'siteOpenDate')))
                           .concat(withStep(4, PARTNER_INSTALL_FIELDS))
+                          .concat(withStep(4, PARTNER_SITE_FIELDS.filter(f => f.key !== 'siteOpenDate')))
                           .concat(withStep(9, PARTNER_AGREE_FIELDS)),
                       docsOwn: true,
                       docsExtra: { all: [
@@ -57092,6 +57350,19 @@ await fetch('${escapeHtml(url)}', { method: 'POST', headers: { 'Content-Type': '
                 + (t === 'partnerShop' && p.parentPartnerName ? ` <span class="text-[11px] text-gray-500">${escapeHtml(p.parentPartnerName)}</span>` : '');
         }
         // 파트너사 자료를 붙인 계정 목록 — 로그인 · 권한 · 개발요청 · 인바운드가 모두 이것을 씁니다
+        // 대리 접수 세션의 '계정' — 업체 정보에 직원 이름을 담당자로 둡니다
+        function partnerProxyHit(sess) {
+            const p = (typeof partners !== 'undefined' ? partners : []).find(x => x.id === sess.partnerId) || null;
+            return {
+                loginId: sess.loginId, partnerId: sess.partnerId, role: 'staff', active: true, proxy: true,
+                proxyName: sess.proxyName || '', proxyBy: sess.proxyBy || '',
+                partnerName: p ? String(p.name || '').replace(/\n/g, ' ').trim() : (sess.partnerName || ''),
+                manager: `${sess.proxyName || '킹오더'} (대리 접수)`, phone: '',
+                custType: p ? (p.custType || '') : '', franchiseHq: p ? (p.franchiseHq || '') : '',
+                franchiseName: p ? (p.franchiseName || '') : '',
+                parentPartnerId: p ? (p.parentPartnerId || '') : '', parentPartnerName: p ? (p.parentPartnerName || '') : ''
+            };
+        }
         function partnerAccountList() {
             const ps = (typeof partners !== 'undefined' ? partners : []);
             return partnerAccounts.map(a => {
@@ -57513,6 +57784,53 @@ await fetch('${escapeHtml(url)}', { method: 'POST', headers: { 'Content-Type': '
         let partnerViewZoom = 'fit';   // fit | full (이미지만)
 
         function partnerViewReset() { partnerViewFiles = []; }
+        // 제출 서류 · 첨부 일괄 다운로드 (영업본부 보완 2026-10-30) — 압축 파일 한 개로 받습니다.
+        // 압축 도구를 못 불러오면 파일을 하나씩 내려받습니다.
+        function partnerIntakeAllFiles(x) {
+            const out = [];
+            (x.docs || []).forEach(dd => partnerDocFileList(dd).forEach((f, i, all) => {
+                if (f && f.dataUrl) out.push({ f, name: `${dd.name}${all.length > 1 ? '_' + (i + 1) : ''}_${f.name}` });
+            }));
+            (x.files || []).forEach(f => { if (f && f.dataUrl) out.push({ f, name: `첨부_${f.name}` }); });
+            return out;
+        }
+        function loadJsZip() {
+            if (window.JSZip) return Promise.resolve(window.JSZip);
+            return new Promise((ok, no) => {
+                const sc = document.createElement('script');
+                sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
+                sc.onload = () => window.JSZip ? ok(window.JSZip) : no(new Error('JSZip'));
+                sc.onerror = () => no(new Error('JSZip'));
+                document.head.appendChild(sc);
+            });
+        }
+        async function downloadPartnerIntakeFiles(id) {
+            const x = partnerIntakeById(id);
+            if (!x) return;
+            const list = partnerIntakeAllFiles(x);
+            if (!list.length) { alert('내려받을 서류가 없습니다.'); return; }
+            const base = String(x.title || x.id).replace(/[\\/:*?"<>|]+/g, '_').slice(0, 60);
+            const safe = (n) => String(n || 'file').replace(/[\\/:*?"<>|]+/g, '_');
+            try {
+                const JSZip = await loadJsZip();
+                const zip = new JSZip();
+                const used = {};
+                for (const it of list) {
+                    let nm = safe(it.name);
+                    if (used[nm]) nm = nm.replace(/(\.[^.]*)?$/, `_${++used[nm]}$1`); else used[nm] = 1;
+                    const blob = await (await fetch(safeFileUrl(it.f.dataUrl))).blob();
+                    zip.file(nm, blob);
+                }
+                const out = await zip.generateAsync({ type: 'blob' });
+                downloadBlobAs(out, `${base}_서류.zip`);
+            } catch (e) {
+                list.forEach((it, i) => setTimeout(() => {
+                    const a = document.createElement('a');
+                    a.href = safeFileUrl(it.f.dataUrl); a.download = safe(it.name);
+                    document.body.appendChild(a); a.click(); a.remove();
+                }, i * 400));
+            }
+        }
         // 그리면서 한 건씩 담고, 누를 때 쓸 자리 번호를 돌려줍니다 (파일이 없으면 -1)
         function partnerViewAdd(f, label) {
             if (!f || !f.dataUrl) return -1;
@@ -57682,6 +58000,8 @@ await fetch('${escapeHtml(url)}', { method: 'POST', headers: { 'Content-Type': '
         //            읽기·검사·표시가 다른 항목과 똑같이 굴러가게 했습니다.
         function partnerFieldHtml(f, prefix, ring, value) {
             const id = prefix + f.key;
+            // 자동 계산 값 (CMS 이용 요금 · 2026-10-30) — 비어 있으면 계산한 값으로 채웁니다
+            if (typeof f.autoValue === 'function' && (value === undefined || value === null || value === '')) value = f.autoValue(partnerFormValuesNow());
             // 스냅샷칸은 값이 아니라 파일을 담는 자리라, 여기서는 자리만 잡고 renderPartnerVanShots() 가 그립니다
             if (f.type === 'shots') return `<div id="${prefix}shots-host" class="mb-4"></div>`;
             // 가맹점 조회칸 — 직접 타자 치는 대신 **등록된 가맹점을 찾아 고릅니다** (2026-09-14)
@@ -58431,6 +58751,9 @@ await fetch('${escapeHtml(url)}', { method: 'POST', headers: { 'Content-Type': '
         //   showIf: { key: '다른 항목 key', in: ['값1','값2'] }  → 그 항목을 그 값으로 골랐을 때만
         //   showIf: { key: '다른 항목 key', notIn: ['값'] }        → 그 값만 아니면 (그 항목이 아예 없는 접수 구분에서도 보입니다)
         function partnerFieldVisible(f, values) {
+            // hideIf — 이 조건이면 감춥니다 (프랜차이즈 본사 접수의 STEP 2 · 2026-10-30)
+            const h = f && f.hideIf;
+            if (h && Array.isArray(h.in) && h.in.map(String).includes(String((values || {})[h.key] || ''))) return false;
             const c = f && f.showIf;
             if (!c) return true;
             const cur = String((values || {})[c.key] || '');
@@ -58739,6 +59062,8 @@ await fetch('${escapeHtml(url)}', { method: 'POST', headers: { 'Content-Type': '
             if (kobStorage.mode === 'partner' && window.kobPartner && kobPartner.session) {
                 const me = partnerAccountList().find(a => a.loginId === kobPartner.session.loginId);
                 if (me) enterPartner(me);
+                // 대리 접수 (2026-10-30) — 파트너센터 아이디가 없는 직원 세션입니다. 업체 정보로 들어갑니다
+                else if (kobPartner.session.proxyBy) enterPartner(partnerProxyHit(kobPartner.session));
             }
         }
 
@@ -59492,6 +59817,18 @@ await fetch('${escapeHtml(url)}', { method: 'POST', headers: { 'Content-Type': '
             const ctBox = document.getElementById('pc-cust-type');
             if (ctBox) ctBox.innerHTML = partnerAccountTypeChip();
             setPartnerWatermark(true);   // 로그인한 뒤부터 배경 로고를 보여 줍니다
+            // 대리 접수 중 안내 띠 (2026-10-30)
+            let pb = document.getElementById('pc-proxy-banner');
+            if (hit.proxy) {
+                if (!pb) {
+                    pb = document.createElement('div');
+                    pb.id = 'pc-proxy-banner';
+                    pb.className = 'bg-indigo-700 text-white text-sm px-4 py-2 text-center';
+                    const app = document.getElementById('partner-app');
+                    if (app) app.insertBefore(pb, app.firstChild);
+                }
+                pb.innerHTML = `<i class="fas fa-user-pen mr-1"></i><b>대리 접수 중</b> · ${escapeHtml(hit.partnerName)} — 접수에 <b>${escapeHtml(hit.proxyName || '')}</b> 님이 대리 접수한 것으로 남습니다 (2시간 후 닫힘)`;
+            } else if (pb) pb.remove();
             // 첫 화면은 홈입니다 (2026-09-14) — 파트너사가 가장 먼저 보는 것은
             // '무엇을 낼까' 가 아니라 '내가 낸 게 어떻게 됐나' 입니다.
             switchPartnerTab('home');
@@ -60183,17 +60520,35 @@ await fetch('${escapeHtml(url)}', { method: 'POST', headers: { 'Content-Type': '
             (st && typeof st.nameOf === 'function') ? st.nameOf(vals || partnerFormValuesNow()) : (st || {}).name || '';
 
         // 위쪽 단계 표시줄
+        // 계정 유형 때문에 통째로 건너뛴 단계 (프랜차이즈 본사의 STEP 2 · 2026-10-30) — 표시줄에 '생략' 으로 남겨 번호가 밀려 보이지 않게 합니다
+        function partnerWizardSkippedSteps(list, vals) {
+            const all = partnerTypeSteps() || [];
+            const t = partnerTypeDef(partnerPickedDept, partnerFormType) || {};
+            const v = vals || partnerFormValuesNow();
+            return all.filter(st => !st.last && !list.some(x => x.n === st.n)).filter(st => {
+                const fs = (t.fields || []).filter(f => (f.step || 1) === st.n);
+                return fs.length && fs.every(f => f.hideIf && Array.isArray(f.hideIf.in) && f.hideIf.in.map(String).includes(String(v[f.hideIf.key] || '')));
+            });
+        }
         function partnerWizardNavHtml(list, tone, vals) {
             const at = list.findIndex(st => st.n === partnerWizardStep);
+            const skipped = partnerWizardSkippedSteps(list, vals);
+            // 단계 번호는 원래 순서(건너뛴 단계 포함)로 매깁니다
+            const order = (partnerTypeSteps() || []).filter(st => list.some(x => x.n === st.n) || skipped.some(x => x.n === st.n));
+            const numOf = (st) => order.findIndex(x => x.n === st.n) + 1;
+            const skipChip = (st) => `<span class="inline-flex items-center gap-1.5 rounded-full border border-dashed border-gray-300 px-3 py-1.5 text-xs font-bold text-gray-400 bg-white" title="프랜차이즈 본사 · 가맹점은 사전 협의로 정해 이 단계를 생략합니다">
+                        <span class="inline-flex items-center justify-center w-4 h-4 rounded-full text-[10px] bg-gray-100">${numOf(st)}</span>
+                        <span class="line-through">${escapeHtml(partnerStepName(st, vals))}</span> <span class="no-underline">생략</span></span><i class="fas fa-chevron-right text-[10px] text-gray-300"></i>`;
             return `<div class="flex flex-wrap items-center gap-2 mb-6">
                 ${list.map((st, i) => {
                     const done = i < at, on = i === at;
                     const cls = on ? `${tone.btn} text-white border-transparent`
                               : done ? 'bg-white text-gray-600 border-gray-300'
                                      : 'bg-gray-50 text-gray-400 border-gray-200';
-                    return `<button type="button" onclick="partnerWizardGo(${st.n})"
+                    const before = skipped.filter(x => x.n < st.n && !list.some((y, k) => k < i && y.n > x.n)).map(skipChip).join('');
+                    return before + `<button type="button" onclick="partnerWizardGo(${st.n})"
                         class="inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-bold transition ${cls}">
-                        <span class="inline-flex items-center justify-center w-4 h-4 rounded-full text-[10px] ${on ? 'bg-white/25' : done ? 'bg-gray-200 text-gray-600' : 'bg-gray-200 text-gray-400'}">${done ? '✓' : (i + 1)}</span>
+                        <span class="inline-flex items-center justify-center w-4 h-4 rounded-full text-[10px] ${on ? 'bg-white/25' : done ? 'bg-gray-200 text-gray-600' : 'bg-gray-200 text-gray-400'}">${done ? '✓' : numOf(st)}</span>
                         ${escapeHtml(partnerStepName(st, vals))}</button>`
                         + (i < list.length - 1 ? '<i class="fas fa-chevron-right text-[10px] text-gray-300"></i>' : '');
                 }).join('')}
@@ -60512,7 +60867,7 @@ await fetch('${escapeHtml(url)}', { method: 'POST', headers: { 'Content-Type': '
                         접수하면 아래 제출 서류에 함께 담깁니다.</p>` : ''}
                     <ul class="space-y-1.5">${docs.map(d => partnerDocRowHtml(d)).join('')}</ul>
                     <input type="file" id="pcf-doc-input" class="hidden" onchange="onPartnerDocPicked(this)" />
-                    <p class="text-xs text-gray-400 mt-2">1건당 3MB 이하 (이미지는 자동 압축 후 업로드). 필수 서류를 모두 첨부해야 접수됩니다.</p>
+                    <p class="text-xs text-gray-400 mt-2">1건당 3MB 이하 (이미지는 자동 압축 후 업로드). 서류 칸에 파일을 끌어다 놓아도 첨부됩니다. 필수 서류를 모두 첨부해야 접수됩니다.</p>
                 </div>`;
         }
         function partnerDocRowHtml(d) {
@@ -60523,7 +60878,7 @@ await fetch('${escapeHtml(url)}', { method: 'POST', headers: { 'Content-Type': '
             const thumb = isImg
                 ? `<img src="${escapeHtml(safeFileUrl(f.dataUrl))}" alt="" class="w-9 h-9 object-cover rounded border border-gray-200 shrink-0" />`
                 : `<span class="w-9 h-9 flex items-center justify-center bg-gray-50 rounded border border-gray-200 shrink-0"><i class="fas ${ic.icon} ${ic.color}"></i></span>`;
-            return `<li class="rounded border ${has ? 'border-gray-200 bg-white' : d.required ? 'border-red-200 bg-red-50/40' : 'border-gray-200 bg-white'} p-2">
+            return `<li class="rounded border ${has ? 'border-gray-200 bg-white' : d.required ? 'border-red-200 bg-red-50/40' : 'border-gray-200 bg-white'} p-2" data-drop-handler="partnerDocDropFiles" data-drop-a="${escapeHtml(d.id)}" title="파일을 끌어다 놓아 첨부할 수 있습니다">
                 <div class="flex items-center gap-2">
                     ${thumb}
                     <span class="flex-1 min-w-0">
@@ -60555,6 +60910,11 @@ await fetch('${escapeHtml(url)}', { method: 'POST', headers: { 'Content-Type': '
             const file = (input.files || [])[0];
             const docId = partnerDocTarget;
             input.value = ''; partnerDocTarget = '';
+            return partnerDocTakeFile(file, docId);
+        }
+        // 서류 칸에 끌어다 놓기 (영업본부 보완 2026-10-30)
+        function partnerDocDropFiles(files, docId) { return partnerDocTakeFile((files || [])[0], docId); }
+        async function partnerDocTakeFile(file, docId) {
             if (!file || !docId) return;
             if (file.size > PARTNER_FILE_MAX_SIZE) { alert(`${file.name} (${collabFileSize(file.size)}): ${gwFileSizeText(PARTNER_FILE_MAX_SIZE)}를 초과합니다.`); return; }
             const up = await gwUploadAsDataUrlShape(file, PARTNER_IMG_MAX_PX);
@@ -60930,7 +61290,7 @@ await fetch('${escapeHtml(url)}', { method: 'POST', headers: { 'Content-Type': '
             const dash = '<span class="text-gray-400">-</span>';
             let html = `<div class="bg-gray-50 rounded border border-gray-100 p-3 space-y-2">
                 ${row('접수처', `${escapeHtml(d.name)} <span class="text-gray-400">·</span> ${escapeHtml(partnerIntakeTypeName(x))}`)}
-                ${row('파트너사', `<b>${escapeHtml(x.partnerName)}</b>`)}
+                ${row('파트너사', `<b>${escapeHtml(x.partnerName)}</b>${x.proxyBy ? ` <span class="ml-1 px-1.5 py-0.5 text-[11px] rounded bg-indigo-50 text-indigo-700 border border-indigo-200 font-semibold"><i class="fas fa-user-pen mr-0.5"></i>대리 접수 · ${escapeHtml(x.proxyBy)}</span>` : ''}`)}
                 ${row('접수자', `${escapeHtml(x.byName || '-')}${x.byPhone ? ` <span class="text-gray-400">·</span> ${escapeHtml(x.byPhone)}` : ''}${x.byEmail ? ` <span class="text-gray-400">·</span> ${escapeHtml(x.byEmail)}` : ''}`)}
                 ${row('접수일시', `${escapeHtml(x.at || '-')} <span class="text-gray-400">·</span> ${escapeHtml(x.id)}`)}
                 ${row('담당자', x.assignee ? `<b>${escapeHtml(x.assignee)}</b>` : '<span class="text-gray-400">미배정</span>')}
@@ -61061,6 +61421,7 @@ await fetch('${escapeHtml(url)}', { method: 'POST', headers: { 'Content-Type': '
                     <p class="text-gray-700 font-semibold mb-1.5"><i class="fas fa-folder-open mr-1 text-gray-500"></i>제출 서류
                         <span class="text-xs font-normal text-gray-400">필수 ${need}건 · 제출 ${done}/${docs.length}건</span>
                         ${x.coRep ? '<span class="text-xs font-bold rounded-full px-2 py-0.5 border text-indigo-700 bg-indigo-50 border-indigo-200 ml-1">공동대표</span>' : ''}
+                        ${done ? `<button type="button" onclick="downloadPartnerIntakeFiles(${jsArg(x.id)})" class="float-right px-2 py-0.5 text-xs rounded border border-gray-300 bg-white text-gray-700 hover:bg-gray-50"><i class="fas fa-file-zipper mr-1"></i>서류 일괄 다운로드</button>` : ''}
                     </p>
                     <ul class="space-y-1">${docs.map(dd => {
                         // 한 서류에 파일이 여러 건일 수 있습니다 (TID 채번 스냅샷)
@@ -61210,6 +61571,7 @@ await fetch('${escapeHtml(url)}', { method: 'POST', headers: { 'Content-Type': '
         function renderPartnerCenter(dept) {
             const el = document.getElementById('sec-partner-center-' + dept);
             if (!el) return;
+            autoAssignPartnerIntakes(dept);   // 파트너사별 담당자 자동 배정 (2026-10-30)
             const d = partnerDeptDef(dept);
             const all = partnerIntakesOf(dept);
             const f = partnerCenterFilter[dept] || 'open';
@@ -61236,6 +61598,7 @@ await fetch('${escapeHtml(url)}', { method: 'POST', headers: { 'Content-Type': '
                     <div class="flex flex-wrap gap-2">
                         ${canHandle && dept === 'ops' ? `<button onclick="openAsOptions()" class="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded text-sm"><i class="fas fa-list-check mr-1"></i>접수 항목 관리</button>` : ''}
                         ${canHandle && dept === 'payment' ? `<button onclick="openPartnerDocModal()" class="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded text-sm font-semibold"><i class="fas fa-folder-open mr-1"></i>제출서류 관리</button>` : ''}
+                        ${canHandle ? `<button onclick="openPartnerProxyPicker(${jsArg(dept)})" title="파트너사를 골라 그 업체로 대신 접수합니다 (접수에 대리 접수한 직원 이름이 남습니다)" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded text-sm"><i class="fas fa-user-pen mr-1"></i>대리 접수</button>` : ''}
                         <button onclick="copyPartnerCenterLink()" class="px-3 py-1.5 bg-white border border-gray-300 text-gray-700 rounded text-sm hover:bg-gray-50"><i class="fas fa-link mr-1"></i>파트너 접수 주소 복사</button>
                     </div>
                 </div>
@@ -61596,7 +61959,14 @@ await fetch('${escapeHtml(url)}', { method: 'POST', headers: { 'Content-Type': '
                             <button type="button" onclick="assignPartnerIntake(${jsArg(x.id)})" class="px-3 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded text-sm font-semibold">지정</button>
                             <button type="button" onclick="assignPartnerIntakeToMe(${jsArg(x.id)})" class="px-3 py-2 bg-white border border-teal-300 text-teal-700 rounded text-sm font-semibold">내가 처리</button>
                         </div>
+                        ${x.autoAssigned && x.assignee === x.autoAssigned ? `<p class="text-[11px] text-gray-400 mt-1"><i class="fas fa-circle-info mr-1"></i>거래처 관리의 영업 담당자로 자동 배정되었습니다.</p>` : ''}
                     </div>
+                    ${partnerIntakeDepts(x).indexOf('sales') > -1 ? `<div>
+                        <p class="text-gray-500 font-medium mb-1">지원금 상계처리</p>
+                        <div class="flex flex-wrap gap-1.5">${PARTNER_SUBSIDY_OFFSET.map(o => `<button type="button" onclick="setPartnerSubsidyOffset(${jsArg(x.id)}, ${jsArg(o.id)})"
+                            class="px-2.5 py-1.5 rounded-full text-xs font-bold border transition ${x.subsidyOffset === o.id ? 'bg-teal-600 text-white border-teal-600' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}">${escapeHtml(o.name)}</button>`).join('')}</div>
+                    </div>` : ''}
+                    ${partnerRentalListHtml(x)}
                     ${partnerDonateApprovalHtml(x)}
                     ${partnerSiteConfirmHtml(x)}
                     ${partnerInstallRequestHtml(x)}
@@ -61621,6 +61991,12 @@ await fetch('${escapeHtml(url)}', { method: 'POST', headers: { 'Content-Type': '
                     <button type="button" onclick="deletePartnerIntake(${jsArg(x.id)})" class="px-3 py-1.5 text-xs bg-red-50 text-red-600 border border-red-200 rounded hover:bg-red-100">
                         <i class="fas fa-trash mr-1"></i>접수 삭제 (관리자)</button>
                 </div>`;
+            } else if (partnerIntakeDepts(x).indexOf('sales') > -1 && canHandlePartnerIntake('sales')) {
+                // 영업본부 담당자도 영업본부 접수함의 건을 지웁니다 (영업본부 보완 2026-10-30)
+                html += `<div class="flex justify-end gap-2 mt-3">
+                    <button type="button" onclick="deletePartnerIntake(${jsArg(x.id)})" class="px-3 py-1.5 text-xs bg-red-50 text-red-600 border border-red-200 rounded hover:bg-red-100">
+                        <i class="fas fa-trash mr-1"></i>접수 삭제</button>
+                </div>`;
             }
 
             document.getElementById('pi-detail-body').innerHTML = html;
@@ -61643,7 +62019,10 @@ await fetch('${escapeHtml(url)}', { method: 'POST', headers: { 'Content-Type': '
         function deletePartnerIntake(id) {
             const x = partnerIntakeById(id);
             if (!x) return;
-            if (!adminDeleteGate('deletePartnerIntake', [id], '파트너센터 접수', `${x.id} · ${x.title || partnerIntakeTypeName(x)}`)) return;
+            // 영업본부 접수함의 건은 영업본부 담당자도 바로 삭제합니다 (영업본부 보완 2026-10-30) — 삭제 이력은 그대로 남깁니다
+            const salesCanDelete = partnerIntakeDepts(x).indexOf('sales') > -1 && canHandlePartnerIntake('sales');
+            if (salesCanDelete) watchDeletion('deletePartnerIntake', [id], '파트너센터 접수', `${x.id} · ${x.title || partnerIntakeTypeName(x)}`, x);
+            else if (!adminDeleteGate('deletePartnerIntake', [id], '파트너센터 접수', `${x.id} · ${x.title || partnerIntakeTypeName(x)}`)) return;
             if (!confirm(`접수 ${x.id} (${x.title || partnerIntakeTypeName(x)}) 을(를) 삭제하시겠습니까?\n파트너 화면에서도 삭제되며 복구할 수 없습니다.`)) return;
             partnerIntakes = partnerIntakes.filter(y => y.id !== id);
             savePartnerIntakes();
@@ -61897,6 +62276,25 @@ await fetch('${escapeHtml(url)}', { method: 'POST', headers: { 'Content-Type': '
         function partnerCanRequestInstall(x) {
             if (!x || !partnerHasSiteCheck(x)) return false;
             return x.dept === 'sales';                     // 영업본부가 받은 건만 (신규 개설 · 추가 장비 구매 · 무상 지원)
+        }
+        // 렌탈 내역 (영업본부 보완 2026-10-30) — 렌탈로 고른 품목만 모아 영업본부 접수 화면에 보여 줍니다
+        function partnerRentalRows(x) {
+            const f = partnerIntakeFieldsOf(x).find(ff => ff.type === 'hwtable');
+            if (!f) return [];
+            return partnerHwRows(((x || {}).extra || {})[f.key]).filter(r => r.method === 'rental' && partnerNum(r.qty) > 0);
+        }
+        function partnerRentalListHtml(x) {
+            if (partnerIntakeDepts(x).indexOf('sales') < 0) return '';
+            const rows = partnerRentalRows(x);
+            if (!rows.length) return '';
+            return `<div>
+                <p class="text-gray-500 font-medium mb-1">렌탈 내역 <span class="text-xs font-normal text-gray-400">(렌탈로 접수된 품목)</span></p>
+                <table class="w-full text-xs border border-gray-200 bg-white">
+                    <thead><tr class="bg-gray-50 text-gray-500"><th class="p-1.5 text-left">품목</th><th class="p-1.5 text-right">수량</th><th class="p-1.5 text-right">렌탈 개월</th><th class="p-1.5 text-right">월 렌탈료</th><th class="p-1.5 text-right">단가</th></tr></thead>
+                    <tbody>${rows.map(r => `<tr class="border-t border-gray-100"><td class="p-1.5">${escapeHtml(r.item || '')}</td><td class="p-1.5 text-right">${partnerNum(r.qty)}</td>
+                        <td class="p-1.5 text-right">${partnerNum(r.months)}</td><td class="p-1.5 text-right">${r.resale ? partnerWon(r.resale) + '원' : '-'}</td><td class="p-1.5 text-right">${r.price ? partnerWon(r.price) + '원' : '-'}</td></tr>`).join('')}</tbody>
+                </table>
+            </div>`;
         }
         function partnerInstallDevicesText(x) {
             const f = partnerIntakeFieldsOf(x).find(ff => ff.type === 'hwtable');
@@ -62236,6 +62634,100 @@ await fetch('${escapeHtml(url)}', { method: 'POST', headers: { 'Content-Type': '
             openPartnerIntakeModal(id);
         }
         function assignPartnerIntakeToMe(id) { assignPartnerIntake(id, currentUserName || ''); }
+        // ---------- 지원금 상계처리 여부 (영업본부 보완 2026-10-30) ----------
+        const PARTNER_SUBSIDY_OFFSET = [{ id: 'yes', name: '상계처리' }, { id: 'no', name: '상계 안 함' }, { id: 'na', name: '해당 없음' }];
+        function setPartnerSubsidyOffset(id, v) {
+            const x = partnerIntakeById(id);
+            if (!x || !canHandleIntake(x)) { alert('처리 권한이 없습니다.'); return; }
+            if (x.subsidyOffset === v) return;
+            x.subsidyOffset = v;
+            (x.history = x.history || []).push({ at: partnerNowStamp(), by: currentUserName || '', text: `지원금 상계처리 → ${(PARTNER_SUBSIDY_OFFSET.find(o => o.id === v) || {}).name || v}` });
+            savePartnerIntakes();
+            refreshPartnerCenterViews();
+            openPartnerIntakeModal(id);
+        }
+        // ---------- 파트너사별 담당자 자동 배정 (영업본부 보완 2026-10-30) ----------
+        // 거래처 관리의 '영업 담당' 을 영업본부 접수의 담당자로 저절로 넣습니다 (가맹점 계정이면 상위 파트너사의 담당).
+        // 이미 담당자가 있거나 한 번 자동 배정한 건은 건드리지 않습니다.
+        function partnerOwnerOf(partnerId) {
+            const all = (typeof partners !== 'undefined' && Array.isArray(partners)) ? partners : [];
+            const p = all.find(c => c && c.id === partnerId);
+            if (!p) return '';
+            if (p.owner) return String(p.owner).trim();
+            const parent = all.find(c => c && (c.id === p.parentPartnerId || c.id === p.parentId));
+            return parent && parent.owner ? String(parent.owner).trim() : '';
+        }
+        // ---------- 대리 접수 (영업본부 보완 2026-10-30) ----------
+        // 파트너센터 아이디를 본부마다 따로 두지 않고, 접수함 담당 직원이 업체를 골라 **그 업체의 파트너센터 접수 창**을 새 탭으로 엽니다.
+        // 서버가 2시간짜리 대리 접수 열쇠를 주고, 그 창에서 낸 접수에는 대리 접수한 직원 이름이 남습니다.
+        let partnerProxyQ = '';
+        const PARTNER_PROXY_KINDS = ['partner', 'hq', 'franchise', 'partnerShop', 'direct', 'dist'];
+        function partnerProxyCompanies() {
+            const all = (typeof partners !== 'undefined' && Array.isArray(partners)) ? partners : [];
+            return all.filter(c => c && c.id && c.name && (PARTNER_PROXY_KINDS.includes(c.kind) || PARTNER_PROXY_KINDS.includes(c.custType)));
+        }
+        function openPartnerProxyPicker(dept) {
+            let m = document.getElementById('partner-proxy-modal');
+            if (!m) {
+                m = document.createElement('div');
+                m.id = 'partner-proxy-modal';
+                m.className = 'hidden fixed inset-0 bg-black/50 z-[70] flex items-center justify-center p-4';
+                m.addEventListener('click', (e) => { if (e.target === m) m.classList.add('hidden'); });
+                document.body.appendChild(m);
+            }
+            partnerProxyQ = '';
+            m.innerHTML = `<div class="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[85vh] flex flex-col">
+                <div class="px-5 py-3 border-b border-gray-200 flex items-center justify-between">
+                    <h3 class="text-base font-bold text-gray-800"><i class="fas fa-user-pen text-indigo-600 mr-1"></i>대리 접수 — 업체 선택</h3>
+                    <button type="button" onclick="document.getElementById('partner-proxy-modal').classList.add('hidden')" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times"></i></button>
+                </div>
+                <div class="px-5 pt-3 text-xs text-gray-500">고른 업체의 파트너센터 접수 창이 새 탭으로 열립니다 (2시간). 그 창에서 낸 접수에는 <b>대리 접수 · ${escapeHtml(currentUserName || '')}</b> 이 함께 남습니다.</div>
+                <div class="px-5 py-3"><input id="partner-proxy-q" type="text" oninput="partnerProxyQ=this.value; renderPartnerProxyList()" placeholder="상호 · 사업자번호 · 대표자 검색" class="w-full p-2 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-indigo-500" /></div>
+                <div id="partner-proxy-list" class="flex-1 overflow-y-auto px-5 pb-4"></div>
+            </div>`;
+            m.classList.remove('hidden');
+            renderPartnerProxyList();
+            setTimeout(() => { const q = document.getElementById('partner-proxy-q'); if (q) q.focus(); }, 50);
+        }
+        function renderPartnerProxyList() {
+            const host = document.getElementById('partner-proxy-list');
+            if (!host) return;
+            const q = String(partnerProxyQ || '').replace(/\s+/g, '').toLowerCase();
+            const list = partnerProxyCompanies().filter(c => !q || [c.name, c.businessNo, c.bizNo, c.ceo].join(' ').replace(/\s+/g, '').toLowerCase().includes(q))
+                .sort((a, b) => String(a.name).localeCompare(String(b.name), 'ko')).slice(0, 100);
+            const kindName = (c) => (PARTNER_CUST_TYPES.find(t => t.id === (c.custType || c.kind)) || {}).name || c.kind || '';
+            host.innerHTML = list.length ? `<ul class="divide-y divide-gray-100 border border-gray-200 rounded">${list.map(c => `<li>
+                <button type="button" onclick="startPartnerProxy(${jsArg(c.id)})" class="w-full text-left px-3 py-2 hover:bg-indigo-50 flex items-center justify-between gap-2">
+                    <span class="min-w-0"><span class="block text-sm font-semibold text-gray-800 truncate">${escapeHtml(c.name)}</span>
+                        <span class="block text-[11px] text-gray-400">${escapeHtml([kindName(c), c.businessNo || c.bizNo, c.ceo].filter(Boolean).join(' · '))}</span></span>
+                    <i class="fas fa-arrow-up-right-from-square text-gray-300"></i></button></li>`).join('')}</ul>`
+                : '<p class="py-8 text-center text-sm text-gray-400">조건에 맞는 업체가 없습니다.</p>';
+        }
+        async function startPartnerProxy(partnerId) {
+            const win = window.open('about:blank', '_blank');   // 팝업 차단을 피하려고 누른 순간 창부터 엽니다
+            try {
+                const j = await kobAuth.call('/api/partner-admin/proxy', { partnerId });
+                const url = location.origin + location.pathname + '?mode=partner#proxy=' + encodeURIComponent(j.token);
+                if (win) win.location.href = url; else window.open(url, '_blank');
+                const m = document.getElementById('partner-proxy-modal'); if (m) m.classList.add('hidden');
+            } catch (e) {
+                if (win) win.close();
+                alert('대리 접수 창을 열지 못했습니다.\n\n· ' + (e && e.message ? e.message : e));
+            }
+        }
+        function autoAssignPartnerIntakes(dept) {
+            if (dept !== 'sales' || !canHandlePartnerIntake('sales')) return;
+            let n = 0;
+            partnerIntakesOf('sales').forEach(x => {
+                if (x.assignee || x.autoAssigned || !PARTNER_OPEN_STATUSES.includes(x.status)) return;
+                const owner = partnerOwnerOf(x.partnerId);
+                if (!owner || !(typeof localUsers !== 'undefined' && localUsers.some(u => u.name === owner && !isResigned(u)))) return;
+                x.assignee = owner; x.autoAssigned = owner;
+                (x.history = x.history || []).push({ at: partnerNowStamp(), by: '시스템', text: `담당자 자동 배정 → ${owner} (거래처 영업 담당)` });
+                n++;
+            });
+            if (n) savePartnerIntakes();
+        }
         function addPartnerIntakeReply(id) {
             const x = partnerIntakeById(id);
             if (!x || !canHandleIntake(x)) { alert('처리 권한이 없습니다.'); return; }
