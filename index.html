@@ -28,6 +28,9 @@
     <link rel="apple-touch-icon" href="assets/pwa/apple-touch-icon.png">
     <!-- 실행 환경 설정 — 아래 홈 화면 이름(dev 는 [DEV] 붙임)이 env 를 보므로 여기서 먼저 읽습니다 -->
     <script src="config/app-config.js"></script>
+    <!-- 화면 버전 (2026-11-16) — 배포할 때마다 올립니다. 개발 · 운영 화면 아래에 "그룹웨어 v1.1.0 · 운영" 처럼 보입니다.
+         groupware = 그룹웨어 화면 · calendar = 킹오더일정(?mode=calendar) -->
+    <script>window.KOB_VERSION = { groupware: '1.1.0', calendar: '1.0.0', date: '2026-11-16' };</script>
     <script>
         (function () {
             // manifest 는 **여기서 만들어 답니다.** (2026-09-05 고침)
@@ -46,10 +49,12 @@
                 // 첫 그림부터 맞는 화면이 나오게 <html data-mode> 를 지금 답니다 (2026-09-21).
                 // 본체는 자료를 다 받은 뒤에야 도는데, 그동안 파트너센터·운행일지 주소로 들어와도
                 // 그룹웨어 로그인 화면이 먼저 보였다가 바뀌었습니다. 아래 <style> 이 이 속성을 봅니다.
-                document.documentElement.setAttribute('data-mode', m === 'partner' ? 'partner' : m === 'mobile' ? 'mobile' : 'groupware');
+                if (!m && location.hash === '#calendar') m = 'calendar';
+                // 킹오더일정(?mode=calendar · 2026-11-12) — 그룹웨어와 같은 문서 · 같은 로그인으로 일정 화면만 휴대폰에 맞춰 보여 줍니다
+                document.documentElement.setAttribute('data-mode', m === 'partner' ? 'partner' : m === 'mobile' ? 'mobile' : m === 'calendar' ? 'calendar' : 'groupware');
                 // 새로고침 때 로그인 화면이 잠깐 보이지 않게 (2026-09-29) — 이 브라우저에 로그인 기록(supabase-js 의 sb-…-auth-token)이
                 // 남아 있으면 로그인 화면 대신 '여는 중' 을 보여 줍니다. 본체가 들어가거나 로그인이 필요하다고 판단하면 이 표시를 뗍니다.
-                if (!m || m === 'mobile') {                 // 운행일지도 로그인이 남아 있으면 로그인 칸 대신 '여는 중' (2026-09-29 검토)
+                if (!m || m === 'mobile' || m === 'calendar') {                 // 운행일지도 로그인이 남아 있으면 로그인 칸 대신 '여는 중' (2026-09-29 검토)
                     try {
                         for (var i = 0; i < localStorage.length; i++) {
                             if (/^sb-.+-auth-token$/.test(localStorage.key(i) || '')) { document.documentElement.setAttribute('data-auth', 'session'); break; }
@@ -62,11 +67,19 @@
                     ? { f: 'partner.webmanifest',   t: '킹오더브라더스 파트너센터',   s: '파트너센터',   c: '#4338ca' }
                     : m === 'mobile'
                     ? { f: 'mobile.webmanifest',    t: '킹오더브라더스 운행일지',     s: '운행기록',     c: '#4f46e5' }
+                    : m === 'calendar'
+                    ? { f: 'calendar.webmanifest',  t: '킹오더브라더스 일정',         s: '킹오더일정',   c: '#1e293b' }
                     : { f: 'groupware.webmanifest', t: '킹오더브라더스 그룹웨어',     s: '그룹웨어',     c: '#1e293b' };
                 // 개발환경(env: 'dev')은 홈 화면 · 창 이름 앞에 [DEV] 를 붙여 운영과 헷갈리지 않게 합니다 (2026-10-12).
                 // manifest 는 정적 파일이라 dev 전용(dev-*.webmanifest)을 따로 둡니다. prod 는 설정이 'prod' 라 원래 이름 그대로.
                 if ((window.KOB_CONFIG || {}).env === 'dev') {
                     app = { f: 'dev-' + app.f, t: '[DEV]' + app.t, s: '[DEV]' + ({ '운행기록': '운행일지' }[app.s] || app.s), c: app.c };
+                }
+                // 킹오더일정 아이콘 — 그룹웨어 로고에 달력 표시 (2026-11-12)
+                if (m === 'calendar') {
+                    var pre = ((window.KOB_CONFIG || {}).env === 'dev') ? 'dev-' : '';
+                    var ico2 = document.querySelector('link[rel="icon"]'); if (ico2) ico2.href = 'assets/pwa/' + pre + 'calendar-icon-192.png';
+                    var ati2 = document.querySelector('link[rel="apple-touch-icon"]'); if (ati2) ati2.href = 'assets/pwa/' + pre + 'calendar-icon-192.png';
                 }
                 // 인바운드 접수는 2026-09-08 부터 그룹웨어 안(파트너센터 › 영업본부 › 인바운드 관리)으로 들어왔습니다.
                 // 별도 주소(?mode=inbound)와 그 홈 화면 이름은 더 쓰지 않습니다.
@@ -98,6 +111,158 @@
         #boot-splash { display: none; }
         html[data-mode="groupware"][data-auth="session"] #login-view { display: none; }
         html[data-mode="groupware"][data-auth="session"] #boot-splash { display: flex; }
+        html[data-mode="calendar"][data-auth="session"] #login-view { display: none; }
+        html[data-mode="calendar"][data-auth="session"] #boot-splash { display: flex; }
+        /* 킹오더일정(?mode=calendar · 2026-11-12) — 그룹웨어 메뉴 · 머리 줄 없이 일정 화면만 */
+        html[data-mode="calendar"] #sidebar, html[data-mode="calendar"] #app-view header { display: none !important; }
+        .calm-only { display: none; }
+        html[data-mode="calendar"] .calm-hide { display: none !important; }
+        /* 페이지 전체는 고정하고 일정 칸(#main-scroll)만 넘깁니다 — 아이폰 사파리에서 100vh 가 보이는 높이보다 커서
+           페이지째 시계(상태 표시줄) 뒤로 밀려 올라가던 문제 (2026-11-12 다니엘님). 로그인 화면은 키보드 때문에 그대로 둡니다. */
+        html[data-mode="calendar"]:has(#app-view:not(.hidden)), html[data-mode="calendar"]:has(#app-view:not(.hidden)) body { height: 100%; overflow: hidden; overscroll-behavior: none; }
+        html[data-mode="calendar"] #app-view { height: 100vh; height: 100dvh; }
+        html[data-mode="calendar"] #app-view > main { height: 100%; }
+        html[data-mode="calendar"] #main-scroll { overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+        html[data-mode="calendar"] #calm-top { display: block; position: sticky; top: 0; z-index: 12; background: #1e293b; color: #fff; padding: 10px 14px; padding-top: calc(10px + env(safe-area-inset-top, 0px)); }
+        html[data-mode="calendar"] .calm-top-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+        html[data-mode="calendar"] .calm-brand { font-weight: 800; font-size: 17px; letter-spacing: -.01em; }
+        html[data-mode="calendar"] .calm-brand i { color: #f472b6; margin-right: 4px; }
+        html[data-mode="calendar"] .calm-icon-btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 8px; font-size: 13px; background: rgba(255,255,255,.12); color: inherit; }
+        html[data-mode="calendar"] #calm-filter-btn.calm-filter-on { background: #f472b6; color: #1e293b; }
+        html[data-mode="calendar"] #main-scroll { padding: 0 0 calc(68px + env(safe-area-inset-bottom, 0px)) 0; }
+        html[data-mode="calendar"] #cal-head { display: none; }
+        html[data-mode="calendar"] #sec-calendar-center.calm-filters-open #cal-head { display: flex; margin: 0; padding: 10px 12px; background: #fff; border-bottom: 1px solid #e5e7eb; }
+        html[data-mode="calendar"] #cal-head select, html[data-mode="calendar"] #cal-head button { font-size: 14px; min-height: 40px; }
+        html[data-mode="calendar"] #calendar-legend { flex-wrap: nowrap; overflow-x: auto; margin: 0; border-radius: 0; border-width: 0 0 1px 0; padding: 8px 12px; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+        html[data-mode="calendar"] #calendar-legend::-webkit-scrollbar { display: none; }
+        html[data-mode="calendar"] #calendar-legend.calm-legend-open { flex-wrap: wrap; overflow-x: hidden; overflow-y: auto; max-height: calc(var(--calm-rows, 4) * 34px + 16px); }
+        html[data-mode="calendar"] #calendar-legend.calm-legend-open .calm-legend-more i { transform: rotate(180deg); }
+        .calm-legend-more { position: sticky; right: 0; background: #fff; padding: 4px 8px; border-radius: 999px; color: #64748b; border: 1px solid #e5e7eb; }
+        .calm-switch { position: relative; width: 46px; height: 26px; flex-shrink: 0; }
+        .calm-switch input { opacity: 0; width: 0; height: 0; position: absolute; }
+        .calm-switch span { position: absolute; inset: 0; border-radius: 999px; background: #cbd5e1; transition: background .15s; }
+        .calm-switch span::after { content: ''; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 999px; background: #fff; transition: transform .15s; box-shadow: 0 1px 2px rgba(0,0,0,.2); }
+        .calm-switch input:checked + span { background: #10b981; }
+        .calm-switch input:checked + span::after { transform: translateX(20px); }
+        .calm-fs-group { margin: 6px 16px 2px; font-size: 13px; color: #64748b; }
+        .calm-fs-card { margin: 4px 12px 10px; background: #fff; border-radius: 14px; border: 1px solid #eef2f7; }
+        .calm-fs-row { display: flex; align-items: center; gap: 10px; padding: 11px 14px; border-top: 1px solid #f1f5f9; font-size: 15px; color: #1e293b; width: 100%; text-align: left; }
+        .calm-fs-row:first-child { border-top: 0; }
+        .calm-fs-ico { width: 30px; height: 30px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; color: #fff; font-size: 14px; overflow: hidden; flex-shrink: 0; }
+        .calm-fs-ico img { width: 100%; height: 100%; object-fit: contain; background: #fff; }
+        .calm-fs-note { margin: 0 16px 10px; font-size: 12px; color: #94a3b8; }
+        html[data-mode="calendar"] #calendar-legend > * { flex-shrink: 0; }
+        html[data-mode="calendar"] #sec-calendar-center > .bg-white.rounded-lg { border-radius: 0; border-width: 0; box-shadow: none; }
+        html[data-mode="calendar"] #calm-bar { display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; background: #fff; border-top: 1px solid #e5e7eb; padding: 4px 6px calc(4px + env(safe-area-inset-bottom, 0px)); justify-content: space-around; align-items: center; }
+        html[data-mode="calendar"] #calm-bar button { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 11px; color: #64748b; padding: 6px 0; min-height: 48px; justify-content: center; }
+        html[data-mode="calendar"] #calm-bar button i { font-size: 18px; }
+        html[data-mode="calendar"] #calm-bar button.calm-on { color: #db2777; font-weight: 700; }
+        html[data-mode="calendar"] #calm-bar button { position: relative; }
+        html[data-mode="calendar"] #calm-bar .calm-dot { position: absolute; top: 6px; left: calc(50% + 8px); width: 7px; height: 7px; border-radius: 999px; background: #ef4444; }
+        html[data-mode="calendar"] .calm-cur-cal { font-size: 12px; color: #cbd5e1; margin-top: 1px; max-width: 62vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; text-align: left; }
+        html[data-mode="calendar"] #sec-calendar-center.calm-list-open #calendar-legend,
+        html[data-mode="calendar"] #sec-calendar-center.calm-list-open > .bg-white.rounded-lg,
+        html[data-mode="calendar"] #sec-calendar-center.calm-list-open #cal-head { display: none !important; }
+        #calm-callist { background: #fff; min-height: 60vh; }
+        .calm-cl-tabs { display: flex; justify-content: center; gap: 28px; border-bottom: 1px solid #e5e7eb; }
+        .calm-cl-tabs button { padding: 12px 2px 10px; font-size: 15px; color: #94a3b8; border-bottom: 3px solid transparent; }
+        .calm-cl-tabs button.on { color: #0f172a; font-weight: 700; border-color: #db2777; }
+        .calm-cl-head { padding: 12px 16px 4px; font-size: 13px; color: #64748b; }
+        .calm-cl-item { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 16px; text-align: left; }
+        .calm-cl-item:active { background: #f8fafc; }
+        .calm-cl-tile { width: 60px; height: 60px; border-radius: 14px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 24px; overflow: hidden; }
+        .calm-cl-tile img { width: 100%; height: 100%; object-fit: contain; background: #fff; }
+        .calm-cl-name { font-size: 15px; font-weight: 700; color: #0f172a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .calm-cl-desc { font-size: 12px; color: #64748b; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .calm-cl-members { display: flex; align-items: center; margin-top: 5px; }
+        .calm-cl-av { width: 22px; height: 22px; border-radius: 999px; border: 2px solid #fff; margin-left: -5px; font-size: 10px; font-weight: 700; color: #fff; display: inline-flex; align-items: center; justify-content: center; object-fit: cover; background: #94a3b8; }
+        .calm-cl-av:first-child { margin-left: 0; }
+        .calm-cl-more { font-size: 11px; color: #64748b; margin-left: 4px; }
+        .calm-cl-new { background: #ef4444; color: #fff; font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 999px; flex-shrink: 0; }
+        html[data-mode="calendar"] #calm-bar .calm-add { flex: 0 0 56px; height: 56px; border-radius: 999px; background: #1e293b; color: #fff; margin-top: -22px; box-shadow: 0 6px 16px rgba(15,23,42,.25); }
+        html[data-mode="calendar"] #calm-bar .calm-add i { font-size: 22px; }
+        html[data-mode="calendar"] #kob-store-status { bottom: calc(72px + env(safe-area-inset-bottom, 0px)) !important; z-index: 45 !important; }
+        /* 월 · 주 보기 — 칸이 좁아서 시간 · 등록자는 빼고 제목만 작은 글씨 한 줄 (2026-11-12 다니엘님: 글씨가 보이게 · 샘플).
+           일정을 누르면 상세, 빈 곳 · 날짜를 누르면 그날 요약이 열립니다 */
+        @media (max-width: 640px) {
+            html[data-mode="calendar"] #cal-grid.grid-cols-7 > div { min-height: 72px; padding: 2px; }
+            html[data-mode="calendar"] #cal-grid .calm-d3 [onclick^="event.stopPropagation(); openScheduleDetailModal"],
+            html[data-mode="calendar"] #cal-grid.grid-cols-7 [onclick^="event.stopPropagation(); openScheduleDetailModal"] {
+                font-size: 10px; line-height: 1.25; padding: 1px 3px; margin-bottom: 2px; letter-spacing: -.02em;
+                white-space: nowrap; overflow: hidden; text-overflow: clip; }
+            html[data-mode="calendar"] #cal-grid.grid-cols-7 [onclick^="event.stopPropagation(); openScheduleDetailModal"] > span.tabular-nums,
+            html[data-mode="calendar"] #cal-grid.grid-cols-7 [onclick^="event.stopPropagation(); openScheduleDetailModal"] > span.opacity-70,
+            html[data-mode="calendar"] #cal-grid.grid-cols-7 [onclick^="event.stopPropagation(); openScheduleDetailModal"] > i { display: none; }
+        }
+        /* 목록 보기 */
+        .calm-day { padding: 10px 12px 2px; font-size: 13px; font-weight: 700; color: #334155; display: flex; gap: 6px; align-items: baseline; position: sticky; top: 0; background: #f8fafc; z-index: 1; }
+        .calm-day.calm-today { color: #db2777; }
+        .calm-day .calm-hol { color: #ef4444; font-weight: 500; font-size: 12px; }
+        .calm-card { display: flex; gap: 10px; align-items: stretch; margin: 6px 12px; padding: 10px 12px; background: #fff; border-radius: 12px; border: 1px solid #e5e7eb; cursor: pointer; }
+        .calm-card:active { background: #f1f5f9; }
+        .calm-card .calm-bar-color { width: 4px; border-radius: 4px; flex-shrink: 0; }
+        .calm-card .calm-time { width: 46px; flex-shrink: 0; font-size: 12px; line-height: 1.35; color: #475569; font-variant-numeric: tabular-nums; }
+        .calm-card .calm-title { font-size: 15px; font-weight: 600; color: #0f172a; line-height: 1.35; word-break: keep-all; overflow-wrap: anywhere; }
+        .calm-card .calm-meta { display: flex; flex-wrap: wrap; gap: 4px 6px; margin-top: 4px; font-size: 12px; color: #64748b; align-items: center; }
+        .calm-card .calm-chip { padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+        .calm-card.calm-off .calm-title { text-decoration: line-through; opacity: .55; }
+        .calm-card .calm-rc { color: #94a3b8; font-size: 11px; }
+        .calm-freshbar { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 8px 12px 0; padding: 8px 12px; border-radius: 10px; background: #fff1f2; color: #9f1239; font-size: 13px; }
+        .calm-freshbar button { padding: 6px 12px; border-radius: 8px; background: #e11d48; color: #fff; font-weight: 600; font-size: 13px; }
+        .calm-empty { margin: 6px 12px; padding: 10px 12px; font-size: 13px; color: #94a3b8; }
+        /* 확인하지 않은 일정 칸 — 오늘 목록 바로 위 (2026-11-16 다니엘님) */
+        .calm-fresh { margin: 8px 0 4px; padding-bottom: 6px; background: #fff1f2; border-top: 1px solid #fecdd3; border-bottom: 1px solid #fecdd3; scroll-margin-top: 8px; }
+        .calm-fresh .calm-freshbar { margin: 0; border-radius: 0; background: transparent; }
+        .calm-fresh-item { position: relative; }
+        .calm-fresh-date { margin: 4px 12px 0; font-size: 12px; font-weight: 600; color: #9f1239; }
+        .calm-fresh-item .calm-card { padding-right: 64px; }
+        .calm-fresh-ok { position: absolute; right: 20px; top: 50%; transform: translateY(-20%); padding: 6px 10px; border-radius: 8px; background: #fff; border: 1px solid #fda4af; color: #be123c; font-weight: 700; font-size: 13px; }
+        /* 그룹웨어 일정캘린더 — 새 일정 · 변경 표시 (2026-11-16) */
+        .gw-new { display: inline-block; margin-right: 3px; padding: 0 4px; border-radius: 4px; font-size: 10px; font-weight: 700; line-height: 14px; color: #fff; background: #e11d48; vertical-align: 1px; }
+        .gw-new.gw-chg { background: #f59e0b; }
+        /* 설정 창 */
+        .calm-sheet-wrap { position: fixed; inset: 0; z-index: 60; background: rgba(15,23,42,.45); display: flex; align-items: flex-end; }
+        .calm-sheet-wrap.hidden { display: none; }
+        .calm-sheet { width: 100%; max-height: 85vh; overflow-y: auto; background: #fff; border-radius: 16px 16px 0 0; padding-bottom: env(safe-area-inset-bottom, 0px); }
+        .calm-sheet-head { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; border-bottom: 1px solid #e5e7eb; font-size: 16px; }
+        .calm-sheet-head .calm-icon-btn { background: #f1f5f9; }
+        .calm-sheet-body { padding: 8px 16px 16px; }
+        .calm-me { padding: 8px 0 12px; font-weight: 600; color: #334155; }
+        .calm-voice-fab { position: fixed; right: 16px; bottom: calc(84px + env(safe-area-inset-bottom, 0px)); z-index: 41; width: 52px; height: 52px; border-radius: 999px; background: #db2777; color: #fff; font-size: 20px; box-shadow: 0 6px 16px rgba(219,39,119,.35); display: inline-flex; align-items: center; justify-content: center; }
+        .calm-voice-fab.hidden { display: none; }
+        .calm-voice-fab.listening { animation: calmPulse 1.2s infinite; }
+        .calm-talk-log { max-height: 42vh; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding: 6px 0; }
+        .calm-talk-q, .calm-talk-a { max-width: 85%; padding: 8px 12px; border-radius: 14px; font-size: 14px; line-height: 1.45; word-break: keep-all; }
+        .calm-talk-q { align-self: flex-start; background: #f1f5f9; color: #0f172a; border-bottom-left-radius: 4px; }
+        .calm-talk-a { align-self: flex-end; background: #db2777; color: #fff; border-bottom-right-radius: 4px; }
+        .calm-talk-mic.listening { background: #db2777; color: #fff; animation: calmPulse 1.2s infinite; }
+        .calm-toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(150px + env(safe-area-inset-bottom, 0px)); z-index: 70; background: #0f172a; color: #fff; padding: 10px 16px; border-radius: 999px; font-size: 14px; max-width: 90vw; }
+        @keyframes calmPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(219,39,119,.5); } 50% { box-shadow: 0 0 0 12px rgba(219,39,119,0); } }
+        .calm-radio { display: flex; align-items: center; gap: 10px; padding: 10px 2px; border-top: 1px solid #f1f5f9; font-size: 15px; color: #1e293b; }
+        .calm-radio input { width: 18px; height: 18px; accent-color: #db2777; }
+        /* 시간 단위(3일) */
+        .calm-d3 { display: grid; grid-template-columns: 40px repeat(3, minmax(0, 1fr)); }
+        .calm-d3 > div { border-bottom: 1px solid #f1f5f9; border-left: 1px solid #f1f5f9; min-width: 0; }
+        .calm-d3 .calm-d3-h { font-size: 12px; font-weight: 700; text-align: center; padding: 6px 2px; background: #f8fafc; color: #334155; }
+        .calm-d3 .calm-d3-h.today { color: #db2777; }
+        .calm-d3 .calm-d3-t { font-size: 10px; color: #94a3b8; text-align: right; padding: 3px 4px; background: #f8fafc; }
+        .calm-d3 .calm-d3-c { min-height: 44px; padding: 2px; }
+        .calm-d3 .calm-d3-c > div { margin-bottom: 2px; }
+        .calm-d3 .calm-d3-c.now { background: #eff6ff; }
+        #cal-day-timeline.calm-d3 { max-height: 60vh; overflow-y: auto; }
+        .calm-row { display: flex; align-items: center; gap: 10px; width: 100%; padding: 14px 4px; border-top: 1px solid #f1f5f9; font-size: 15px; color: #1e293b; text-align: left; }
+        .calm-danger { color: #dc2626; }
+        /* 일정 창 — 휴대폰에서는 전체 화면 · 단추 줄은 아래에 고정 */
+        @media (max-width: 640px) {
+            html[data-mode="calendar"] #schedule-modal, html[data-mode="calendar"] #schedule-detail-modal, html[data-mode="calendar"] #day-summary-modal { padding: 0; align-items: stretch; }
+            html[data-mode="calendar"] #schedule-modal > div, html[data-mode="calendar"] #schedule-detail-modal > div, html[data-mode="calendar"] #day-summary-modal > div { max-width: none; width: 100%; height: 100%; max-height: none; border-radius: 0; padding-top: calc(16px + env(safe-area-inset-top, 0px)); }
+            html[data-mode="calendar"] #schedule-modal > div, html[data-mode="calendar"] #schedule-detail-modal > div { padding-left: 16px; padding-right: 16px; padding-bottom: 0; }
+            html[data-mode="calendar"] #schedule-detail-modal > div { display: flex; flex-direction: column; }
+            html[data-mode="calendar"] #schedule-detail-modal .calm-actions { margin-top: auto; }
+            html[data-mode="calendar"] .calm-actions { position: sticky; bottom: 0; background: #fff; margin: 0 -16px; padding: 10px 16px calc(10px + env(safe-area-inset-bottom, 0px)); border-top: 1px solid #e5e7eb; z-index: 2; }
+            html[data-mode="calendar"] .calm-actions button { min-height: 44px; }
+            html[data-mode="calendar"] #schedule-form input, html[data-mode="calendar"] #schedule-form select, html[data-mode="calendar"] #schedule-form textarea { font-size: 16px; }
+        }
         #m-opening { display: none; }
         html[data-mode="mobile"][data-auth="session"] #m-auth { display: none; }
         html[data-mode="mobile"][data-auth="session"] #m-opening { display: block; }
@@ -1877,7 +2042,7 @@
         <div id="login-card" class="relative z-10 w-full max-w-md p-8 bg-white rounded-xl shadow-lg">
             <div class="text-center mb-8">
                 <img src="image/logo.png" alt="킹오더브라더스 로고" class="h-16 mx-auto mb-3 object-contain" onerror="this.onerror=null;this.outerHTML='&lt;i class=&quot;fas fa-building text-4xl text-blue-600 mb-3&quot;&gt;&lt;/i&gt;'" />
-                <h1 class="text-2xl font-bold text-gray-800">킹오더브라더스 그룹웨어</h1>
+                <h1 class="text-2xl font-bold text-gray-800" id="login-title">킹오더브라더스 그룹웨어</h1>
                 <p class="text-gray-500 text-sm mt-1">사내 시스템 로그인이 필요합니다.</p>
             </div>
             <form onsubmit="handleLogin(event)">
@@ -1910,6 +2075,7 @@
                 <p class="text-gray-600 mb-2"><i class="fas fa-circle-info mr-1 text-blue-500"></i>등록된 로그인 계정이 없습니다. 관리자 계정의 임시 비밀번호를 먼저 생성해 주세요.</p>
                 <button type="button" onclick="bootstrapAdminAccount()" class="w-full py-2 px-3 bg-white border border-blue-300 text-blue-700 hover:bg-blue-50 rounded-lg text-sm transition-colors"><i class="fas fa-key mr-1"></i>초기 설정: 관리자 임시 비밀번호 생성</button>
             </div>
+            <p class="js-app-ver text-center text-[11px] text-gray-400 mt-4" data-app="auto"></p>
         </div>
     </div>
 
@@ -2169,6 +2335,7 @@
                 <button onclick="handleLogout()" class="w-full flex items-center justify-center px-4 py-2 border border-slate-600 rounded-md hover:bg-slate-800/70 text-red-400 text-sm transition-colors">
                     <i class="fas fa-sign-out-alt mr-2"></i> 로그아웃
                 </button>
+                <p class="js-app-ver text-center text-[11px] text-gray-500 mt-2" data-app="groupware"></p>
             </div>
         </aside>
 
@@ -3537,13 +3704,114 @@
                 <!-- 통합 일정캘린더 섹션 (부서별 캘린더 3개를 통합) -->
                 <!-- ============================================================= -->
                 <section id="sec-calendar-center" class="content-section hidden">
-                    <div class="mb-4 flex flex-col sm:flex-row justify-between items-start sm:items-center space-y-3 sm:space-y-0">
-                        <div>
+                    <!-- 킹오더일정 아래 줄 — 보기 전환 · 새 일정 · 설정 -->
+                    <nav id="calm-bar" class="calm-only" aria-label="킹오더일정 메뉴">
+                        <button type="button" data-view="callist" onclick="calmOpenCalList()"><i class="fas fa-layer-group"></i><span>캘린더</span><span class="calm-dot hidden"></span></button>
+                        <button type="button" data-view="sched" onclick="calmSetView(calmPreferredView())"><i class="fas fa-calendar-days"></i><span>일정</span></button>
+                        <button type="button" class="calm-add" onclick="openScheduleModal()" title="새 일정"><i class="fas fa-plus"></i></button>
+                        <button type="button" data-view="today" onclick="calmShowToday()"><i class="fas fa-calendar-check"></i><span>오늘</span></button>
+                        <button type="button" data-view="settings" onclick="calmOpenSettings()"><i class="fas fa-gear"></i><span>설정</span></button>
+                    </nav>
+                    <!-- 킹오더일정 설정 창 -->
+                    <div id="calm-settings" class="hidden calm-sheet-wrap" onclick="if(event.target===this)calmCloseSettings()">
+                        <div class="calm-sheet">
+                            <div class="calm-sheet-head"><b>설정</b><button type="button" onclick="calmCloseSettings()" class="calm-icon-btn" title="닫기"><i class="fas fa-xmark"></i></button></div>
+                            <div class="calm-sheet-body">
+                                <p class="calm-me"><i class="fas fa-user-circle"></i> <span id="calm-me-name"></span></p>
+                                <div id="calm-view-opts" class="py-2">
+                                    <p class="font-semibold text-gray-800 mb-1"><i class="fas fa-table-cells mr-1"></i>일정 표시 방법</p>
+                                    <label class="calm-radio"><input type="radio" name="calm-view" value="month" onchange="calmChooseView(this.value)"> 월간</label>
+                                    <label class="calm-radio"><input type="radio" name="calm-view" value="day" onchange="calmChooseView(this.value)"> 시간 단위(1일)</label>
+                                    <label class="calm-radio"><input type="radio" name="calm-view" value="day3" onchange="calmChooseView(this.value)"> 시간 단위(3일)</label>
+                                    <label class="calm-radio"><input type="radio" name="calm-view" value="list" onchange="calmChooseView(this.value)"> 리스트</label>
+                                    <label class="calm-radio"><input type="radio" name="calm-view" value="week" onchange="calmChooseView(this.value)"> 주간</label>
+                                </div>
+                                <button type="button" id="calm-open-filter" class="calm-row" onclick="calmCloseSettings(); calmOpenFilterSheet()"><i class="fas fa-filter"></i> 필터 설정 <i class="fas fa-chevron-right ml-auto text-gray-300"></i></button>
+                                <div id="calm-noti"></div>
+                                <div class="py-2">
+                                    <div id="calm-lab-voice-box">
+                                    <p class="font-semibold text-gray-800 mb-1"><i class="fas fa-flask mr-1"></i>실험실 <span class="text-xs font-normal text-gray-400">시험 중인 기능</span></p>
+                                    <label class="calm-radio justify-between"><span><i class="fas fa-microphone mr-2 text-pink-600"></i>음성으로 일정 만들기</span><span class="calm-switch"><input type="checkbox" id="calm-lab-voice" onchange="calmSetLab('voice', this.checked)"><span></span></span></label>
+                                    <label class="calm-radio justify-between"><span><i class="fas fa-comments mr-2 text-pink-600"></i>음성 안내로 묻고 답하기</span><span class="calm-switch"><input type="checkbox" id="calm-lab-talk" onchange="calmSetLab('talk', this.checked)"><span></span></span></label>
+                                    <label class="calm-radio justify-between"><span><i class="fas fa-cloud mr-2 text-pink-600"></i>서버 받아쓰기 <span class="text-xs text-gray-400">(시험)</span></span><span class="calm-switch"><input type="checkbox" id="calm-lab-stt" onchange="calmSetLab('sttServer', this.checked)"><span></span></span></label>
+                                    <label class="calm-radio justify-between"><span><i class="fas fa-volume-high mr-2 text-pink-600"></i>질문 소리로 읽기</span><span class="calm-switch"><input type="checkbox" id="calm-lab-tts" onchange="calmSetLab('talkTts', this.checked)"><span></span></span></label>
+                                    <p class="text-xs text-gray-500">함께 켜면 🎤 를 눌렀을 때 시리처럼 소리로 물어봅니다 — 언제 · 어떤 내용 · 참석자 · 세부내용을 차례로 묻고, "네" 하면 바로 등록합니다.</p>
+                                    <p class="text-xs text-gray-500">켜면 [+] 위에 🎤 단추가 생깁니다. "내일 오후 3시 강남 고객사 미팅 김영업 초대" 처럼 말하면 일정 입력창을 채워 줍니다. 확인한 뒤 [등록하기] 를 누르세요.</p>
+                                    </div>
+                                </div>
+                                <a id="calm-open-gw" class="calm-row" href="./" target="_blank" rel="noopener"><i class="fas fa-up-right-from-square"></i> 그룹웨어 열기 <span class="ml-auto text-xs text-gray-400">새 창</span></a>
+                                <button type="button" class="calm-row calm-danger" onclick="calmCloseSettings(); handleLogout()"><i class="fas fa-right-from-bracket"></i> 로그아웃</button>
+                                <p class="js-app-ver text-center text-xs text-gray-400 pt-3 pb-1" data-app="calendar"></p>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- 킹오더일정 실험실 — 음성으로 일정 만들기 (2026-11-12) -->
+                    <button type="button" id="calm-voice-fab" class="hidden calm-voice-fab" onclick="calmOpenVoice()" title="음성으로 일정 만들기"><i class="fas fa-microphone"></i></button>
+                    <div id="calm-voice-sheet" class="hidden calm-sheet-wrap" onclick="if(event.target===this)calmCloseVoice()">
+                        <div class="calm-sheet">
+                            <div class="calm-sheet-head"><b><i class="fas fa-microphone mr-1 text-pink-600"></i>음성으로 일정 만들기</b><button type="button" onclick="calmCloseVoice()" class="calm-icon-btn" title="닫기"><i class="fas fa-xmark"></i></button></div>
+                            <div class="calm-sheet-body">
+                                <p id="calm-voice-status" class="text-sm text-gray-600 py-2"></p>
+                                <textarea id="calm-voice-text" rows="3" class="w-full p-3 border border-gray-300 rounded-lg text-base" placeholder="예: 내일 오후 3시 강남 고객사 미팅 김영업 초대" oninput="calmVoicePreview()"></textarea>
+                                <div id="calm-voice-preview" class="text-sm text-gray-700 mt-2"></div>
+                                <div class="flex gap-2 mt-3">
+                                    <button type="button" id="calm-voice-listen" onclick="calmVoiceListen()" class="flex-1 py-3 rounded-lg border border-pink-300 text-pink-700 font-semibold"><i class="fas fa-microphone mr-1"></i>다시 듣기</button>
+                                    <button type="button" id="calm-voice-make" onclick="calmVoiceMake()" class="flex-1 py-3 rounded-lg bg-gray-900 text-white font-semibold">일정 만들기</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- 킹오더일정 실험실 — 음성 안내로 묻고 답하기 (2026-11-12 다니엘님) -->
+                    <div id="calm-talk-sheet" class="hidden calm-sheet-wrap" onclick="if(event.target===this)calmCloseTalk()">
+                        <div class="calm-sheet">
+                            <div class="calm-sheet-head"><b><i class="fas fa-comments mr-1 text-pink-600"></i>음성 안내로 일정 만들기</b><span class="flex gap-2"><button type="button" id="calm-talk-replay" onclick="calmTalkReplay()" class="calm-icon-btn" title="다시 듣기"><i class="fas fa-volume-high"></i></button><button type="button" onclick="calmCloseTalk()" class="calm-icon-btn" title="닫기"><i class="fas fa-xmark"></i></button></span></div>
+                            <div class="calm-sheet-body">
+                                <div id="calm-talk-log" class="calm-talk-log"></div>
+                                <p id="calm-talk-hint" class="text-xs text-gray-500 py-1"></p>
+                                <div class="flex gap-2 mt-1">
+                                    <button type="button" id="calm-talk-yes" onclick="calmTalkAnswer('네')" class="flex-1 py-2.5 rounded-lg bg-gray-900 text-white font-semibold">네</button>
+                                    <button type="button" id="calm-talk-no" onclick="calmTalkAnswer('아니요')" class="flex-1 py-2.5 rounded-lg border border-gray-300 text-gray-700 font-semibold">아니요</button>
+                                </div>
+                                <div class="flex gap-2 mt-2 items-center">
+                                    <button type="button" id="calm-talk-mic" onclick="calmTalkMic()" class="calm-talk-mic w-11 h-11 shrink-0 rounded-full border border-pink-300 text-pink-700" title="말하기"><i class="fas fa-microphone"></i></button>
+                                    <input type="text" id="calm-talk-input" class="flex-1 min-w-0 p-2.5 border border-gray-300 rounded-lg text-base" placeholder="말 대신 입력 (키보드 🎤 도 됩니다)" onkeydown="if(event.key==='Enter'&&!event.isComposing){event.preventDefault();calmTalkSend();}">
+                                    <button type="button" id="calm-talk-send" onclick="calmTalkSend()" class="px-3 py-2.5 rounded-lg bg-pink-600 text-white font-semibold shrink-0">보내기</button>
+                                </div>
+                                <details id="calm-talk-diag" class="mt-2 text-[11px] text-gray-400"><summary>진단 기록 <button type="button" id="calm-talk-diag-copy" onclick="event.preventDefault();calmDiagCopy()" class="ml-2 px-2 py-0.5 rounded border border-gray-300 text-gray-600">기록 복사</button></summary><div id="calm-talk-diag-list" class="mt-1 max-h-60 overflow-y-auto font-mono leading-4"></div></details>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- 킹오더일정 필터 설정 (2026-11-12 다니엘님 샘플) -->
+                    <div id="calm-filter-sheet" class="hidden calm-sheet-wrap" onclick="if(event.target===this)calmCloseFilterSheet()">
+                        <div class="calm-sheet bg-slate-50" style="max-height:92vh">
+                            <div class="calm-sheet-head bg-white"><button type="button" id="calm-filter-back" onclick="calmFilterBack()" class="calm-icon-btn" title="닫기"><i class="fas fa-xmark"></i></button><b id="calm-filter-title">필터 설정</b><span style="width:36px"></span></div>
+                            <div id="calm-filter-body"></div>
+                        </div>
+                    </div>
+                    <!-- 킹오더일정(?mode=calendar) 위 줄 — 휴대폰 전용 (2026-11-12) -->
+                    <div id="calm-top" class="calm-only">
+                        <div class="calm-top-row">
+                            <div class="min-w-0">
+                                <div class="calm-brand"><i class="fas fa-calendar-days"></i> 킹오더일정</div>
+                                <button type="button" id="calm-cur-cal" onclick="calmOpenCalList()" class="calm-cur-cal">전체 캘린더 <i class="fas fa-caret-down"></i></button>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <button type="button" id="calm-filter-btn" onclick="calmOpenFilterSheet()" class="calm-icon-btn" title="필터"><i class="fas fa-filter"></i><span>필터</span></button>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="cal-head" class="mb-4 flex flex-col sm:flex-row justify-between items-start sm:items-center space-y-3 sm:space-y-0">
+                        <div class="calm-hide">
                             <h3 class="text-lg font-bold text-gray-800">일정캘린더</h3>
                             <p class="text-gray-500 text-sm">개인, 팀별, 공유 캘린더를 통합 조회합니다. <span id="calendar-scope-label" class="text-sky-600 font-medium"></span></p>
                         </div>
                         <div class="flex items-center flex-wrap gap-2">
-                            <button onclick="openPhoneSyncHelp()" class="bg-white border border-emerald-300 text-emerald-700 hover:bg-emerald-50 px-3 py-1.5 rounded text-sm transition-colors whitespace-nowrap">
+                            <!-- 킹오더일정 — 휴대폰 전용 일정 화면 (2026-11-12) -->
+                            <a id="calm-open-link" href="?mode=calendar" target="_blank" rel="noopener" title="휴대폰 전용 일정 화면을 새 창으로 엽니다. 휴대폰에서는 홈 화면에 추가해 앱처럼 쓸 수 있습니다."
+                               class="calm-hide bg-white border border-pink-300 text-pink-700 hover:bg-pink-50 px-3 py-1.5 rounded text-sm transition-colors whitespace-nowrap">
+                                <i class="fas fa-calendar-days mr-1"></i>킹오더일정
+                            </a>
+                            <button onclick="openPhoneSyncHelp()" class="calm-hide bg-white border border-emerald-300 text-emerald-700 hover:bg-emerald-50 px-3 py-1.5 rounded text-sm transition-colors whitespace-nowrap">
                                 <i class="fas fa-mobile-screen-button mr-1"></i>휴대폰 연동 방법
                             </button>
                             <select id="calendar-filter-cal" onchange="renderCalendar()" class="py-1.5 px-3 text-sm border border-gray-300 rounded text-gray-700 bg-gray-50 cursor-pointer">
@@ -3553,7 +3821,7 @@
                             <select id="calendar-filter-dept" onchange="renderCalendar()" class="py-1.5 px-3 text-sm border border-gray-300 rounded text-gray-700 bg-gray-50 cursor-pointer">
                                 <option value="">전체 부서</option>
                             </select>
-                            <select id="calendar-view-select" onchange="setCalendarView(this.value)" class="py-1.5 px-3 text-sm border border-gray-300 rounded text-gray-700 bg-white cursor-pointer">
+                            <select id="calendar-view-select" onchange="setCalendarView(this.value)" class="calm-hide py-1.5 px-3 text-sm border border-gray-300 rounded text-gray-700 bg-white cursor-pointer">
                                 <option value="day">일간 보기</option>
                                 <option value="week">주간 보기</option>
                                 <option value="month" selected>월간 보기</option>
@@ -3562,9 +3830,13 @@
                             <button id="calendar-type-manage-btn" onclick="openScheduleTypeModal(document.getElementById('calendar-filter-dept').value)" class="hidden bg-gray-500 hover:bg-gray-600 text-white px-3 py-1.5 rounded text-sm transition-colors whitespace-nowrap">
                                 <i class="fas fa-sliders mr-1"></i>구분 관리
                             </button>
-                            <button onclick="openScheduleModal()" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded text-sm transition-colors">+ 일정 등록</button>
+                            <button onclick="openScheduleModal()" class="calm-hide bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded text-sm transition-colors">+ 일정 등록</button>
                         </div>
                     </div>
+                    <!-- 킹오더일정 — 캘린더 리스트 (2026-11-12 다니엘님 샘플) -->
+                    <div id="calm-callist" class="hidden"></div>
+                    <!-- 확인하지 않은 일정 (그룹웨어 일정캘린더 · 2026-11-16 다니엘님) — 킹오더일정은 목록 칸으로 따로 보여 줌 -->
+                    <div id="cal-fresh-wrap" class="calm-hide"></div>
                     <!-- 캘린더 범례 (클릭하면 해당 캘린더만 보기) -->
                     <div id="calendar-legend" class="mb-3 flex flex-wrap items-center gap-2 bg-white border border-gray-200 rounded-lg p-3">
                         <!-- JS 동적 렌더링 -->
@@ -6273,6 +6545,20 @@
             </div>
 
             <div class="p-5">
+                <!-- 킹오더일정 안내 (2026-11-12) — 구글 캘린더는 개인 일정과 섞이고 초대한 사람이 보이지 않아, 회사 일정 전용 화면을 따로 둡니다 -->
+                <div class="mb-5 rounded-lg border border-pink-200 bg-pink-50 p-4">
+                    <h4 class="font-semibold text-gray-800 mb-1"><i class="fas fa-calendar-days mr-1 text-pink-600"></i>휴대폰 전용 일정 화면 — 킹오더일정</h4>
+                    <p class="text-sm text-gray-700">회사 일정만 따로 보고, 초대한 사람 · 확인한 사람 · 새 일정 숫자를 확인할 수 있습니다. 그룹웨어 일정과 같은 자료입니다.</p>
+                    <ol class="list-decimal list-inside text-sm text-gray-700 mt-2 space-y-1">
+                        <li>휴대폰에서 아래 주소를 엽니다.</li>
+                        <li>아이폰: 사파리 [공유 › 홈 화면에 추가] · 안드로이드: 크롬 [⋮ › 홈 화면에 추가]</li>
+                        <li>홈 화면의 <b>킹오더일정</b> 아이콘으로 열고, 설정(톱니)에서 [이 기기에서 알림 받기]를 누릅니다.</li>
+                    </ol>
+                    <div class="mt-2 flex items-center gap-2">
+                        <code id="calm-url" class="flex-1 min-w-0 truncate text-xs bg-white border border-pink-200 rounded px-2 py-1.5"></code>
+                        <button type="button" onclick="copyCalendarModeUrl()" class="shrink-0 text-xs px-3 py-1.5 rounded bg-gray-800 text-white">주소 복사</button>
+                    </div>
+                </div>
                 <!-- 먼저 할 일 -->
                 <div class="mb-5">
                     <h4 class="font-semibold text-gray-800 mb-2"><span class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-gray-800 text-white text-xs mr-1.5">1</span>사전 준비 (안드로이드·아이폰 공통)</h4>
@@ -6535,7 +6821,7 @@
                     <label class="block text-sm font-medium text-gray-700 mb-1">상세 내용</label>
                     <textarea id="schedule-description" rows="3" class="w-full p-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="일정 상세 내용을 입력하세요"></textarea>
                 </div>
-                <div class="flex justify-end space-x-2">
+                <div class="calm-actions flex justify-end space-x-2">
                     <button type="button" onclick="closeScheduleModal()" class="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 transition-colors">닫기</button>
                     <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors">등록하기</button>
                 </div>
@@ -6594,7 +6880,7 @@
                 </div>
                 <!-- 내가 초대받은 일정이면 여기서 응답 -->
                 <div id="detail-schedule-respond" class="hidden bg-indigo-50 border border-indigo-200 rounded p-3">
-                    <p class="text-sm font-medium text-indigo-900 mb-2"><i class="fas fa-envelope-open-text mr-1"></i>이 일정에 초대되었습니다. 참석 여부를 선택해 주세요.</p>
+                    <p class="text-sm font-medium text-indigo-900 mb-2"><i class="fas fa-envelope-open-text mr-1"></i><span id="detail-invite-by">이 일정에 초대되었습니다.</span> 참석 여부를 선택해 주세요.</p>
                     <div class="flex flex-wrap gap-2">
                         <button type="button" onclick="respondToSchedule('accepted')" class="px-3 py-1.5 text-sm rounded bg-green-600 text-white hover:bg-green-700 transition-colors"><i class="fas fa-circle-check mr-1"></i>수락</button>
                         <button type="button" onclick="respondToSchedule('tentative')" class="px-3 py-1.5 text-sm rounded bg-amber-500 text-white hover:bg-amber-600 transition-colors"><i class="fas fa-circle-question mr-1"></i>미정</button>
@@ -6602,6 +6888,7 @@
                         <span id="detail-schedule-my-status" class="self-center text-xs text-indigo-700"></span>
                     </div>
                 </div>
+                <div id="detail-schedule-reads" class="hidden"></div>
                 <div>
                     <p class="text-sm font-medium text-gray-500">상세 내용</p>
                     <p id="detail-schedule-description" class="text-base text-gray-800 whitespace-pre-line"></p>
@@ -6610,7 +6897,7 @@
             <p id="detail-schedule-readonly" class="hidden text-xs text-gray-500 bg-gray-50 border border-gray-200 rounded px-3 py-2 mb-3">
                 <i class="fas fa-eye mr-1"></i><span id="detail-schedule-readonly-text"></span>
             </p>
-            <div class="flex flex-wrap justify-end gap-2">
+            <div class="calm-actions flex flex-wrap justify-end gap-2">
                 <button id="btn-restore-schedule" class="hidden px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 transition-colors"><i class="fas fa-rotate-left mr-1"></i>되살리기</button>
                 <button id="btn-purge-schedule" class="hidden px-4 py-2 bg-red-800 text-white rounded hover:bg-red-900 transition-colors" title="관리자 — 캘린더에서 완전히 지웁니다">완전 삭제</button>
                 <button id="btn-edit-schedule" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors">수정</button>
@@ -10271,6 +10558,7 @@ const QUOTE_TEMPLATES = [
     <script src="js/kob-files.js"></script>
     <script src="js/kob-presence.js"></script>
     <script src="js/kob-push.js"></script>
+    <script src="js/kob-reads.js"></script>
     <script type="text/x-kob-main" id="kob-main">
         // ==================== 운행내역 백엔드 API 설정 ====================
         // 같은 서버(server.js)에서 HTML을 서빙하면 상대경로로 동작.
@@ -11876,7 +12164,8 @@ const QUOTE_TEMPLATES = [
             
             // 새로고침이면 보던 화면으로, 아니면 접근 가능한 첫 번째 메뉴로 자동 이동
             const availableMenus = document.querySelectorAll('.nav-item:not(.hidden)');
-            if (restoreLastPage()) { /* 보던 화면 그대로 */ }
+            if (isCalendarMode()) { navigate('calendar-center', document.getElementById('nav-calendar-center')); calmApplyFilterPrefs(); calmApplyLab(); calmSyncBar(); scrollCalendarToToday(); }   // 킹오더일정 — 언제나 일정 화면
+            else if (restoreLastPage()) { /* 보던 화면 그대로 */ }
             else if (availableMenus.length > 0) {
                 const firstMenu = availableMenus[0];
                 // onclick에 toggleSubmenu('...')가 함께 있을 수 있으므로 navigate('...') 호출만 추출
@@ -11893,10 +12182,20 @@ const QUOTE_TEMPLATES = [
             }
             renderPresenceUi();
             setTimeout(() => maybeAskPush(), 2500);        // 폰 · PC 알림 켜기 안내 (2026-09-29)
+            if (window.kobReads) { kobReads.setMe({ email: currentUserEmail, name: currentUserName }); kobReads.load().catch(() => { }); }   // 일정 확인 기록 (2026-11-12)
+            if (isCalendarMode()) {
+                // 일정 알림을 누르고 들어왔으면(?schedule=일정번호) 그 일정 상세를 엽니다 · 이 기기 알림에 킹오더일정 표시
+                try {
+                    const q = new URLSearchParams(location.search);
+                    if (q.has('schedule')) { const sid = q.get('schedule'); q.delete('schedule'); history.replaceState(null, '', location.pathname + (q.toString() ? '?' + q : '') + location.hash); setTimeout(() => openScheduleFromNotice(sid), 400); }
+                } catch (e) { /* 주소를 손대지 못하면 그냥 둡니다 */ }
+                if (window.kobPush && kobPush.touchApp) kobPush.touchApp().catch(() => { });
+            }
             try {
                 const q = new URLSearchParams(location.search);
                 if (q.has('noti')) { q.delete('noti'); history.replaceState(null, '', location.pathname + (q.toString() ? '?' + q : '') + location.hash); setTimeout(openNotiFromPush, 300); }
                 // 킹오더챗 대화방 공지 칸에서 누르고 들어온 경우 — ?notice=공지번호 → 공지 상세 창 (2026-11-02)
+                if (q.has('schedule') && !isCalendarMode()) { const sid = q.get('schedule'); q.delete('schedule'); history.replaceState(null, '', location.pathname + (q.toString() ? '?' + q : '') + location.hash); setTimeout(() => openScheduleFromNotice(sid), 400); }   // 새 일정 알림(그룹웨어 기기) (2026-11-12)
                 if (q.has('notice')) { const nid = q.get('notice'); q.delete('notice'); history.replaceState(null, '', location.pathname + (q.toString() ? '?' + q : '') + location.hash); setTimeout(() => openNoticeView(nid), 400); }
             } catch (e) { /* 주소를 손대지 못하면 그냥 둡니다 */ }
         }
@@ -12038,7 +12337,7 @@ const QUOTE_TEMPLATES = [
         // 화면이 뜰 때 — ① 재설정 메일의 링크로 들어왔으면 새 비밀번호 창, ② 로그인이 남아 있으면 바로 들어가기,
         //                ③ 계정이 하나도 없으면 처음 설정 안내
         (async function initAuthScreen() {
-            if (new URLSearchParams(location.search).get('mode') || location.hash === '#partner') return;   // 파트너센터 · 운행일지 화면은 해당 없음
+            if ((new URLSearchParams(location.search).get('mode') && !isCalendarMode()) || location.hash === '#partner') return;   // 파트너센터 · 운행일지 화면은 해당 없음 (킹오더일정은 그룹웨어 로그인 그대로)
             try {
                 if (await kobAuth.recovery()) {
                     endBootSplash();
@@ -12072,6 +12371,7 @@ const QUOTE_TEMPLATES = [
             'collab-transferred': { icon: 'fa-share-from-square', color: 'indigo', label: '요청 이관' },
             'collab-comment':     { icon: 'fa-comment-dots',      color: 'indigo', label: '협업 코멘트' },
             'schedule-reminder':  { icon: 'fa-bell',              color: 'amber',  label: '일정 알림' },
+            'schedule-invite':    { icon: 'fa-envelope-open-text', color: 'indigo', label: '일정 초대' },
             'schedule-cancelled': { icon: 'fa-ban',               color: 'red',    label: '일정 취소' },
             'schedule-deleted':   { icon: 'fa-trash-can',         color: 'red',    label: '일정 삭제' },
             'notice-new':         { icon: 'fa-bullhorn',          color: 'amber',  label: '공지사항' },
@@ -12108,6 +12408,7 @@ const QUOTE_TEMPLATES = [
             if (n.type === 'schedule-cancelled') return `<b>${escapeHtml(n.title)}</b> 일정이 <b>취소</b>되었습니다.${n.detail ? `<br><span class="text-xs text-gray-600">${escapeHtml(n.detail)}</span>` : ''}`;
             if (n.type === 'schedule-deleted') return `<b>${escapeHtml(n.title)}</b> 일정이 <b>삭제</b>되었습니다.${n.detail ? `<br><span class="text-xs text-gray-600">${escapeHtml(n.detail)}</span>` : ''}`;
             if (n.type === 'schedule-restored') return `<b>${escapeHtml(n.title)}</b> 취소 · 삭제했던 일정이 <b>다시 진행</b>됩니다.${n.detail ? `<br><span class="text-xs text-gray-600">${escapeHtml(n.detail)}</span>` : ''}`;
+            if (n.type === 'schedule-invite') return `<b>${escapeHtml(n.by || '')}</b> 님이 <b>${escapeHtml(n.title)}</b> 일정에 초대했습니다.${n.detail ? `<br><span class="text-xs text-gray-600">${escapeHtml(n.detail)}</span>` : ''}`;
             if (n.type === 'schedule-reminder') return `<b>${escapeHtml(n.title)}</b> 일정이 곧 시작됩니다.${n.detail ? `<br><span class="text-xs text-gray-600">${escapeHtml(n.detail)}</span>` : ''}`;
             if (n.type === 'collab-taken') return `<b>${escapeHtml(n.title)}</b> 함께 받은 협업 요청이 처리되었습니다.${n.detail ? `<br><span class="text-xs text-gray-600">${escapeHtml(n.detail)}</span>` : ''}`;
             if (n.type === 'collab-comment') return `<b>${escapeHtml(n.title)}</b> 협업 요청에 코멘트가 등록되었습니다.${n.detail ? `<br><span class="text-xs text-gray-600">${escapeHtml(n.detail)}</span>` : ''}`;
@@ -12612,6 +12913,7 @@ const QUOTE_TEMPLATES = [
         }
         if (typeof navigator !== 'undefined' && navigator.serviceWorker && navigator.serviceWorker.addEventListener) {
             navigator.serviceWorker.addEventListener('message', (e) => { if (e.data && e.data.type === 'kob-open-noti') openNotiFromPush(); });
+            navigator.serviceWorker.addEventListener('message', (e) => { if (e.data && e.data.type === 'kob-open-schedule' && e.data.id) openScheduleFromNotice(e.data.id); });   // 킹오더일정 (2026-11-12)
         }
 
         async function onMyPhotoPicked(input) {
@@ -13369,6 +13671,8 @@ const QUOTE_TEMPLATES = [
             return !!(sec && !sec.classList.contains('hidden'));
         }
         function navigate(sectionId, element) {
+            // 킹오더일정은 일정 화면에만 머뭅니다 (다른 화면으로 가는 링크 · 알림을 눌러도)
+            if (isCalendarMode() && sectionId !== 'calendar-center') return;
             // 사외 계정(외주업체 등)은 허용된 화면 밖으로 나갈 수 없습니다 (주소 직접 입력·옛 링크 차단)
             if (externalUser && allowedPageIds.length && !allowedPageIds.includes(sectionId)) {
                 alert('접근 권한이 없는 화면입니다.');
@@ -18208,7 +18512,7 @@ const QUOTE_TEMPLATES = [
 
         // ==================== 일정 캘린더 로직 ====================
         let currentDate = new Date();
-        let currentCalendarView = 'month'; // 'day', 'week', 'month'
+        let currentCalendarView = (typeof isCalendarMode === 'function' && isCalendarMode()) ? calmPreferredView() : 'month';   // 킹오더일정은 설정의 표시 방법으로 (처음엔 리스트 · 2026-11-12) // 'day', 'week', 'month'
         
         // 오늘, 어제, 내일 날짜 계산 (일간/주간 보기에 표시될 샘플)
         const getFormattedDate = (dateObj) => {
@@ -18666,8 +18970,10 @@ const QUOTE_TEMPLATES = [
             schedules.forEach(s => {
                 if (!s || !s.id) return;
                 alive.add(s.id);
-                const now = JSON.stringify(s);
-                if (scheduleSaved.get(s.id) === now) return;          // 안 바뀐 것은 보내지 않습니다
+                let now = JSON.stringify(s);
+                const prev = scheduleSaved.get(s.id);
+                if (prev === now) return;          // 안 바뀐 것은 보내지 않습니다
+                if (stampScheduleTimes(s, prev)) now = JSON.stringify(s);   // 등록 · 변경 시각 (킹오더일정 · 2026-11-12)
                 scheduleSaved.set(s.id, now);
                 kobDb.save('schedules', s).catch(e => console.error('[일정] 저장 실패', e));
             });
@@ -18677,6 +18983,66 @@ const QUOTE_TEMPLATES = [
                 kobDb.remove('schedules', id).catch(e => console.error('[일정] 삭제 실패', e));
             });
             gcalPushSoon();                                       // 구글 캘린더로 바로 보냅니다 (2026-09-23)
+        }
+
+        // ---------- 킹오더일정 — 등록 · 변경 시각, 확인 기록, 새 일정 숫자 (2026-11-12) ----------
+        // 새 일정 숫자 = 내가 볼 수 있고 · 남이 등록했고 · 아직 열어 보지 않은 일정 + 내가 연 뒤 남이 바꾼 일정
+        //   · 기능을 켠 날(CAL_NEW_SINCE) 전에 등록한 일정은 세지 않습니다 (처음부터 수백 건이 뜨지 않게)
+        //   · '바꿈' 은 날짜 · 시간 · 제목 · 참석자(이름)만 봅니다. 참석 응답 · 진행상황 · 색은 바꿈으로 치지 않습니다
+        //   · 확인 기록은 일정 줄이 아니라 schedule_reads 표에 둡니다 (js/kob-reads.js · supabase/schema-v10.sql)
+        const CAL_NEW_SINCE = '2026-11-16';   // 운영은 킹오더일정 운영 시작일부터 셉니다 (개발은 2026-11-12) — 예전 일정이 한꺼번에 '확인하지 않은 일정' 으로 뜨지 않게
+        function scheduleChangeSig(s) {
+            const names = (Array.isArray(s && s.attendees) ? s.attendees : []).map(a => a && a.name).filter(Boolean).sort();
+            return JSON.stringify([s.date || '', s.endDate || '', s.allDay === true, s.startTime || '', s.endTime || '', s.title || '', names]);
+        }
+        // 저장 직전에 부릅니다. 시각을 찍었으면 true.
+        function stampScheduleTimes(s, prevJson) {
+            const nowIso = new Date().toISOString();
+            const me = (typeof currentUserName !== 'undefined' && currentUserName) || '';
+            if (!prevJson) { if (s.createdAt) return false; s.createdAt = nowIso; return true; }
+            let before = null; try { before = JSON.parse(prevJson); } catch (e) { return false; }
+            if (scheduleChangeSig(before) === scheduleChangeSig(s)) return false;
+            s.changedAt = nowIso; s.changedBy = me;
+            return true;
+        }
+        function myScheduleRead(s) {
+            const m = window.kobReads && kobReads.mine ? kobReads.mine() : null;
+            return m ? (m.get(scheduleMasterId(s.id)) || null) : null;
+        }
+        function scheduleMineAsOwner(s) {
+            const me = (typeof currentUserName !== 'undefined' && currentUserName) || '';
+            const myEmail = String((typeof currentUserEmail !== 'undefined' && currentUserEmail) || '').toLowerCase();
+            return (!!me && scheduleOrganizer(s) === me) || (!!myEmail && String(s.createdBy || '').toLowerCase() === myEmail);
+        }
+        function scheduleIsNewForMe(s) {
+            if (!s || isBirthdaySchedule(s) || isScheduleOff(s)) return false;
+            if (!canViewSchedule(s)) return false;
+            if (scheduleMineAsOwner(s)) return false;
+            // 등록 시각은 UTC(ISO) 로 남으므로 한국 시간 자정 기준으로 견줍니다
+            const at = Date.parse(s.createdAt || '');
+            if (!at || at < Date.parse(CAL_NEW_SINCE + 'T00:00:00+09:00')) return false;
+            return !myScheduleRead(s);
+        }
+        function scheduleIsChangedForMe(s) {
+            if (!s || isBirthdaySchedule(s) || isScheduleOff(s) || !s.changedAt) return false;
+            if (!canViewSchedule(s)) return false;
+            const me = (typeof currentUserName !== 'undefined' && currentUserName) || '';
+            if (s.changedBy && s.changedBy === me) return false;
+            const r = myScheduleRead(s);
+            return !!r && String(s.changedAt) > String(r.last || '');
+        }
+        // 캘린더별 숫자 { team: 2, 'sales-share': 1, ... } — 반복 일정은 회차가 여러 개여도 한 건
+        function calNewCounts(list) {
+            const out = {}, seen = new Set();
+            (list || []).forEach(s => {
+                const mid = scheduleMasterId(s.id);
+                if (seen.has(mid)) return;
+                if (!scheduleIsNewForMe(s) && !scheduleIsChangedForMe(s)) return;
+                seen.add(mid);
+                const c = scheduleCalendarId(s);
+                out[c] = (out[c] || 0) + 1;
+            });
+            return out;
         }
 
         // 저장한 일정을 구글로 보내라고 서버에 알립니다. 잇달아 고칠 때를 대비해 2초 모아서 한 번만 부릅니다.
@@ -18729,6 +19095,7 @@ const QUOTE_TEMPLATES = [
         function setCalendarView(view) {
             currentCalendarView = view;
             renderCalendar();
+            if (typeof calmSyncBar === 'function') calmSyncBar();
         }
 
         // ==================== 일정 조회 권한 (협업 조회 권한과 동일 구조) ====================
@@ -18774,8 +19141,9 @@ const QUOTE_TEMPLATES = [
         }
 
         // 부서 조회 범위 규칙 하나만 판정 (팀별 캘린더에 적용)
-        function matchesCalendarScope(s, scopeInfo) {
-            const name = currentUserName, dept = currentUserDept;
+        // who: { name, dept } — 없으면 로그인한 사람. 킹오더일정 새 일정 알림이 다른 직원 기준으로도 같은 규칙을 씁니다 (2026-11-12)
+        function matchesCalendarScope(s, scopeInfo, who) {
+            const name = who ? who.name : currentUserName, dept = who ? who.dept : currentUserDept;
             const scope = scopeInfo.scope;
             // cross(본부장 크로스체크)는 조회 범위상 전사와 동일 — 편집은 등록한 사람 · 관리자 · 대리 수정자만(canEditSchedule)
             if (scope === 'all' || scope === 'cross' || dept === 'admin') return true;
@@ -18794,12 +19162,26 @@ const QUOTE_TEMPLATES = [
         //   팀별   : 기존 부서 조회 권한 규칙 그대로
         //   공유   : 로그인한 전 직원
         function canViewSchedule(s, scopeInfo) {
+            return canUserViewSchedule(s, null, scopeInfo);
+        }
+        // 그 직원(u: { name, dept, level })이 이 일정을 볼 수 있는지 — 없으면 로그인한 사람. 규칙은 하나입니다.
+        function canUserViewSchedule(s, u, scopeInfo) {
+            const name = u ? u.name : currentUserName, dept = u ? u.dept : currentUserDept, level = u ? u.level : currentUserLevel;
             // 초대받은 사람은 캘린더 종류·부서와 무관하게 그 일정을 본다 (내 일정에 표시되어야 하므로)
-            if (isInvited(s, currentUserName)) return true;
+            if (isInvited(s, name)) return true;
             const share = scheduleCalendar(s).share;
-            if (share === 'self') return (s.salesperson || '') === currentUserName;
+            if (share === 'self') return (s.salesperson || '') === name;
             if (share === 'all') return true;
-            return matchesCalendarScope(s, scopeInfo || getCalendarScopeFor(currentUserName, currentUserDept, currentUserLevel));
+            return matchesCalendarScope(s, scopeInfo || getCalendarScopeFor(name, dept, level), u ? { name, dept } : null);
+        }
+        // 새 일정 알림을 받을 수 있는 직원 번호 — 그 일정을 볼 수 있고, 퇴사 · 사외(외주) 계정이 아니며, 내가 아닌 사람
+        function scheduleNewViewers(s) {
+            const ext = new Set((typeof orgDepts !== 'undefined' ? orgDepts : []).filter(d => d.external).map(d => d.id).concat(['vendor']));
+            const extGroup = (u) => (typeof userGroupIds === 'function' ? userGroupIds(u) : [u.groupId]).some(id => ((typeof permissionGroups !== 'undefined' ? permissionGroups : []).find(g => g.id === id) || {}).external);
+            return (typeof localUsers !== 'undefined' ? localUsers : [])
+                .filter(u => u && u.id && !isResigned(u) && !ext.has(u.dept) && !extGroup(u) && u.name !== currentUserName)
+                .filter(u => canUserViewSchedule(s, u))
+                .map(u => String(u.id));
         }
 
         // 일정 수정/삭제 권한 — **등록한 사람과 관리자만** (2026-09-28 사용자 요청)
@@ -19031,13 +19413,16 @@ const QUOTE_TEMPLATES = [
             const el = document.getElementById('calendar-legend');
             if (!el) return;
             const inMonth = visibleSchedules.filter(s => String(s.date || '').slice(0, 7) === ym);
-            const chips = CALENDARS.map(c => {
+            const fresh = calNewCounts(visibleSchedules);   // 새 일정 · 변경됨 숫자 (킹오더일정 · 2026-11-12)
+            const newBadge = (id) => `<span data-cal-new="${id}" class="${fresh[id] ? '' : 'hidden '}bg-rose-600 text-white rounded-full px-1.5 font-bold" title="확인하지 않은 새 일정 · 변경된 일정">${fresh[id] || 0}</span>`;
+            const calmNames = !isCalendarMode() || calmFilterPrefs().names !== false;
+            const chips = CALENDARS.filter(c => !isCalendarMode() || calmCalShown(c.id)).map(c => {
                 const count = inMonth.filter(s => scheduleCalendarId(s) === c.id).length;
                 const on = activeId === c.id;
                 const ring = on ? 'ring-2 ring-offset-1 ring-gray-400' : 'opacity-90 hover:opacity-100';
                 return `<button type="button" onclick="filterCalendarBy(${jsArg(c.id)})" title="${escapeHtml(c.desc)}" class="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-all ${c.chip} ${ring}">
-                            <i class="fas ${c.icon}"></i>${escapeHtml(c.name)}
-                            <span class="bg-white/70 text-gray-700 rounded-full px-1.5">${count}</span>
+                            <i class="fas ${c.icon}"></i>${calmNames ? escapeHtml(c.name) : ''}
+                            <span class="bg-white/70 text-gray-700 rounded-full px-1.5">${count}</span>${newBadge(c.id)}
                         </button>`;
             }).join('');
             // '전체 보기' — 맨 왼쪽에 항상 둡니다. 어느 캘린더를 골랐든 누르면 전체 캘린더로 (UAT 2026-10-08)
@@ -19048,7 +19433,9 @@ const QUOTE_TEMPLATES = [
                             <i class="fas fa-layer-group"></i>전체 보기
                             <span class="${activeId ? 'bg-gray-100 text-gray-700' : 'bg-white/25 text-white'} rounded-full px-1.5">${total}</span>
                         </button>`;
-            el.innerHTML = `<span class="text-xs font-semibold text-gray-500 mr-1">캘린더 <span class="font-normal text-gray-400">· ${Number(ym.slice(5))}월</span></span>${all}${chips}`;
+            const more = isCalendarMode() ? `<button type="button" class="calm-legend-more" onclick="calmToggleLegend()" title="필터 영역 펼치기 · 접기"><i class="fas fa-chevron-down"></i></button>` : '';
+            el.innerHTML = `<span class="text-xs font-semibold text-gray-500 mr-1">캘린더 <span class="font-normal text-gray-400">· ${Number(ym.slice(5))}월</span></span>${all}${chips}${more}`;
+            if (typeof calmRenderCalList === 'function' && isCalendarMode()) { calmRenderCalList(fresh); calmSyncCurCal(); }   // 킹오더일정 캘린더 리스트 · 빨간 점 (2026-11-12)
         }
 
         // 범례 클릭 → 필터 셀렉트와 동기화
@@ -19121,7 +19508,10 @@ const QUOTE_TEMPLATES = [
             const size = o.large ? 'px-2 py-1 text-xs sm:text-sm' : 'px-1.5 py-0.5 text-[10px] sm:text-xs';
             // 날짜 셀 전체가 '하루 요약' 클릭 영역이므로, 칩 클릭은 상세 모달만 열리도록 전파를 막는다
             const look = scheduleChipLook(s, cal);
-            return `<div onclick="event.stopPropagation(); openScheduleDetailModal(${jsArg(s.id)})" class="rounded truncate cursor-pointer hover:opacity-80 ${size} ${look.cls}${dim}"${look.style} title="${escapeHtml(tooltip)}">${offIcon}${timeHtml}${inviteIcon}${isRecurring(s) ? '<i class="fas fa-repeat text-[9px] opacity-60 mr-0.5" title="반복 일정"></i>' : ''}${escapeHtml(s.title)}${isBirthdaySchedule(s) ? '' : ` <span class="opacity-70">(${escapeHtml(s.salesperson || '미지정')})</span>`}</div>`;
+            // 확인하지 않은 새 일정 · 변경된 일정 표시 (2026-11-16 다니엘님 — 그룹웨어 일정캘린더에도)
+            const freshTag = scheduleIsNewForMe(s) ? '<span class="gw-new" title="확인하지 않은 새 일정">새</span>'
+                : scheduleIsChangedForMe(s) ? '<span class="gw-new gw-chg" title="확인한 뒤 바뀐 일정">변경</span>' : '';
+            return `<div onclick="event.stopPropagation(); openScheduleDetailModal(${jsArg(s.id)})" class="rounded truncate cursor-pointer hover:opacity-80 ${size} ${look.cls}${dim}"${look.style} title="${escapeHtml(tooltip)}">${freshTag}${offIcon}${timeHtml}${inviteIcon}${isRecurring(s) ? '<i class="fas fa-repeat text-[9px] opacity-60 mr-0.5" title="반복 일정"></i>' : ''}${escapeHtml(s.title)}${isBirthdaySchedule(s) ? '' : ` <span class="opacity-70">(${escapeHtml(s.salesperson || '미지정')})</span>`}</div>`;
         }
 
         // ==================== 하루 일정 요약 모달 ====================
@@ -19556,7 +19946,10 @@ const QUOTE_TEMPLATES = [
             if (gwHolidayFetched && String(gwHolidayFetched.updatedAt || '') > String(gwHolidayCache.updatedAt || '')) return gwHolidayFetched.days || {};
             return gwHolidayCache.days;
         }
-        function gwHolidayName(ds) { return gwHolidayDays()[ds] || ''; }
+        function gwHolidayName(ds) {
+            if (typeof isCalendarMode === 'function' && isCalendarMode() && typeof calmFilterPrefs === 'function' && calmFilterPrefs().holiday === false) return '';   // 킹오더일정 필터 설정 (2026-11-12)
+            return gwHolidayDays()[ds] || '';
+        }
         let gwHolidayAsked = false;
         function refreshHolidays() {
             if (gwHolidayAsked || typeof fetch === 'undefined' || !(window.kobStorage && kobStorage.mode === 'supabase')) return;
@@ -19597,10 +19990,12 @@ const QUOTE_TEMPLATES = [
             fillCalendarFilterSelect();
             const deptFilter = (document.getElementById('calendar-filter-dept') || {}).value || '';
             const calFilter = (document.getElementById('calendar-filter-cal') || {}).value || '';
-            const visible = getVisibleSchedules(scopeInfo).filter(s => !deptFilter || (s.dept || 'sales') === deptFilter);
+            const visible = getVisibleSchedules(scopeInfo).filter(s => !deptFilter || (s.dept || 'sales') === deptFilter)
+                .filter(s => !isCalendarMode() || calmCalShown(scheduleCalendarId(s)));   // 킹오더일정 — 필터 설정에서 끈 캘린더는 빼고 (2026-11-12)
             const deptSchedules = visible.filter(s => !calFilter || scheduleCalendarId(s) === calFilter);
             // 범례 건수는 부서 필터까지 반영한 값 (캘린더 필터는 제외 — 클릭 전환용) · 보고 있는 달의 일정만 (2026-10-14)
             renderCalendarLegend(visible, calFilter, `${year}-${String(month + 1).padStart(2, '0')}`);
+            renderCalFreshBar();
 
             // '구분 관리' 버튼은 편집 권한이 있는 사용자에게만 노출
             const typeBtn = document.getElementById('calendar-type-manage-btn');
@@ -19651,7 +20046,11 @@ const QUOTE_TEMPLATES = [
                 `;
             }
 
-            if (currentCalendarView === 'month') {
+            if (currentCalendarView === 'list') {
+                renderCalendarMobileList(grid, dayHeader, monthYearText, deptSchedules, year, month);
+            } else if (currentCalendarView === 'day3') {
+                renderCalendarDay3(grid, dayHeader, monthYearText, deptSchedules);
+            } else if (currentCalendarView === 'month') {
                 monthYearText.innerText = `${year}년 ${month + 1}월`;
                 grid.className = 'grid grid-cols-7 auto-rows-fr bg-gray-200 gap-px';
                 if (dayHeader) dayHeader.style.display = '';
@@ -19762,6 +20161,1252 @@ const QUOTE_TEMPLATES = [
         }
 
         // 오늘이 있는 주를 화면 가운데로 (2026-10-20) — 캘린더에 들어올 때 · [오늘] 을 누를 때만 (자료가 새로 와서 다시 그릴 때는 움직이지 않음)
+        // ==================== 킹오더일정 — 목록 보기 · 아래 줄 · 설정 (2026-11-12) ====================
+        // 확인 기록이 바뀌면(내가 열었거나 다른 기기에서) 숫자 · 표시를 다시 그립니다
+        window.addEventListener('kob-reads-change', () => {
+            const sec = document.getElementById('sec-calendar-center');
+            if (sec && !sec.classList.contains('hidden') && typeof renderCalendar === 'function') renderCalendar();
+            calmUpdateAppBadge();
+        });
+        // 휴대폰에서는 달력 칸에 제목이 잘려 보여서, 그 달 일정을 날짜별 카드로 늘어놓은 '목록' 을 첫 보기로 씁니다.
+        // 그리는 자료는 renderCalendar 가 거른 그대로(권한 · 부서 · 캘린더 거르기)라 다른 보기와 같은 일정만 나옵니다.
+        function scheduleOwnerLabel(s) { return isBirthdaySchedule(s) ? '' : '등록 ' + (scheduleOrganizer(s) || '미지정'); }
+        function calmCardHtml(s) {
+            const cal = scheduleCalendar(s);
+            const look = scheduleChipLook(s, cal);
+            const off = scheduleOffState(s);
+            const my = myAttendeeStatus(s);
+            const time = isAllDaySchedule(s) ? '종일' : `${escapeHtml(s.startTime || '')}${s.endTime ? '<br>' + escapeHtml(s.endTime) : ''}`;
+            const owner = scheduleOwnerLabel(s);
+            const myChip = my ? `<span class="calm-chip ${attendeeStatusMeta(my).chip}">${isSelfJoined(s) ? '참가' : '초대 ' + attendeeStatusMeta(my).name}</span>` : '';
+            const fresh = scheduleIsNewForMe(s) ? '<span class="calm-chip calm-new bg-rose-600 text-white">새 일정</span>'
+                : scheduleIsChangedForMe(s) ? '<span class="calm-chip calm-new bg-amber-500 text-white">변경됨</span>' : '';
+            const rc = isBirthdaySchedule(s) ? '' : `<span class="calm-rc" data-rc="${escapeHtml(scheduleMasterId(s.id))}"></span>`;
+            return `<div data-sid="${escapeHtml(s.id)}" class="calm-card${off || my === 'declined' ? ' calm-off' : ''}" onclick="openScheduleDetailModal(${jsArg(s.id)})">
+                <span class="calm-bar-color ${cal.swatch}"></span>
+                <div class="calm-time">${time}</div>
+                <div class="flex-1 min-w-0">
+                    <div class="calm-title">${scheduleOffBadge(s)}${isRecurring(s) ? '<i class="fas fa-repeat text-[10px] opacity-60 mr-1" title="반복 일정"></i>' : ''}${escapeHtml(s.title || '(제목 없음)')}</div>
+                    <div class="calm-meta">${fresh}<span class="calm-chip ${cal.chip}"><i class="fas ${cal.icon} mr-1"></i>${escapeHtml(cal.short)}</span>${owner ? `<span>${escapeHtml(owner)}</span>` : ''}${myChip}${rc}</div>
+                </div>
+            </div>`;
+        }
+        function renderCalendarMobileList(grid, dayHeader, monthYearText, list, year, month) {
+            monthYearText.innerText = `${year}년 ${month + 1}월`;
+            grid.className = 'bg-slate-50 pb-4';
+            if (dayHeader) dayHeader.style.display = 'none';
+            const today = ymd(new Date());
+            const last = new Date(year, month + 1, 0).getDate();
+            const WD = ['일', '월', '화', '수', '목', '금', '토'];
+            let html = '';
+            for (let d = 1; d <= last; d++) {
+                const ds = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+                const day = list.filter(s => s.date === ds).sort(compareScheduleTime);
+                const isToday = ds === today;
+                if (!day.length && !isToday) continue;
+                const hol = gwHolidayName(ds);
+                html += `<div class="calm-day${isToday ? ' calm-today' : ''}"${isToday ? ' data-today="1"' : ''}>${month + 1}월 ${d}일 (${WD[new Date(year, month, d).getDay()]})${isToday ? ' · 오늘' : ''}${hol ? ` <span class="calm-hol">${escapeHtml(hol)}</span>` : ''}</div>`;
+                html += day.length ? day.map(calmCardHtml).join('') : '<div class="calm-empty">오늘 일정이 없습니다.</div>';
+            }
+            // 확인하지 않은 일정 — 오늘 줄 바로 위에 먼저 (오늘이 이 달에 없으면 맨 위) · 일정마다 [확인] (2026-11-16 다니엘님)
+            const fresh = calmFreshList().sort((a, b) => String(a.date).localeCompare(String(b.date)) || compareScheduleTime(a, b));
+            const freshHtml = fresh.length ? `<div id="calm-fresh" class="calm-fresh"><div class="calm-freshbar"><span><i class="fas fa-bell mr-1"></i>확인하지 않은 일정 <b>${fresh.length}</b>건</span><button type="button" onclick="calmMarkAllSeen()">모두 확인</button></div>${fresh.map(s => {
+                const [yy, mm, dd] = String(s.date || '').split('-').map(Number);
+                const dl = yy ? `${mm}월 ${dd}일 (${WD[new Date(yy, mm - 1, dd).getDay()]})${s.date === today ? ' · 오늘' : ''}` : '';
+                return `<div class="calm-fresh-item" data-fresh-sid="${escapeHtml(s.id)}"><div class="calm-fresh-date">${dl}</div>${calmCardHtml(s)}<button type="button" class="calm-fresh-ok" data-fresh-ok onclick="event.stopPropagation(); calmMarkSeen(${jsArg(s.id)})">확인</button></div>`;
+            }).join('')}</div>` : '';
+            const todayAt = html.indexOf('<div class="calm-day calm-today"');
+            const body = html || '<div class="calm-empty">이 달에 등록된 일정이 없습니다.</div>';
+            grid.innerHTML = todayAt >= 0 ? html.slice(0, todayAt) + freshHtml + html.slice(todayAt) : freshHtml + body;
+            calmFillReadCounts(grid);
+        }
+        // 지금 거르기(부서 · 캘린더)에 맞는 확인하지 않은 일정 (회차가 여러 개인 반복 일정은 하나로)
+        function calmFreshList() {
+            const scopeInfo = getCalendarScopeFor(currentUserName, currentUserDept, currentUserLevel);
+            const deptFilter = (document.getElementById('calendar-filter-dept') || {}).value || '';
+            const calFilter = (document.getElementById('calendar-filter-cal') || {}).value || '';
+            const seen = new Set();
+            return getVisibleSchedules(scopeInfo)
+                .filter(s => (!deptFilter || (s.dept || 'sales') === deptFilter) && (!calFilter || scheduleCalendarId(s) === calFilter))
+                .filter(s => scheduleIsNewForMe(s) || scheduleIsChangedForMe(s))
+                .filter(s => { const m = scheduleMasterId(s.id); if (seen.has(m)) return false; seen.add(m); return true; });
+        }
+        // 그룹웨어 일정캘린더 — '확인하지 않은 일정 N건 [보기] [모두 확인]' 줄 · 펼치면 목록(날짜 · 시간 · 제목 · 캘린더 · 등록자 · [확인])
+        let calFreshOpen = false;
+        function renderCalFreshBar() {
+            const box = document.getElementById('cal-fresh-wrap'); if (!box) return;
+            if (isCalendarMode()) { box.innerHTML = ''; return; }
+            const list = calmFreshList().sort((a, b) => String(a.date).localeCompare(String(b.date)) || compareScheduleTime(a, b));
+            if (!list.length) { calFreshOpen = false; box.innerHTML = ''; return; }
+            const WD = ['일', '월', '화', '수', '목', '금', '토'];
+            const rows = list.map(s => {
+                const cal = scheduleCalendar(s);
+                const [yy, mm, dd] = String(s.date || '').split('-').map(Number);
+                const when = (yy ? `${mm}/${dd}(${WD[new Date(yy, mm - 1, dd).getDay()]})` : '') + ' ' + (isAllDaySchedule(s) ? '종일' : escapeHtml(s.startTime || ''));
+                const tag = scheduleIsNewForMe(s) ? '<span class="gw-new">새</span>' : '<span class="gw-new gw-chg">변경</span>';
+                return `<div data-fresh-sid="${escapeHtml(s.id)}" class="flex items-center gap-2 px-3 py-2 border-t border-rose-100 hover:bg-rose-50 cursor-pointer" onclick="openScheduleDetailModal(${jsArg(s.id)})">
+                    ${tag}<span class="text-xs text-gray-500 tabular-nums w-24 shrink-0">${when}</span>
+                    <span class="flex-1 min-w-0 truncate text-sm text-gray-800">${escapeHtml(s.title || '(제목 없음)')}</span>
+                    <span class="text-[11px] px-2 py-0.5 rounded-full ${cal.chip} shrink-0"><i class="fas ${cal.icon} mr-1"></i>${escapeHtml(cal.short)}</span>
+                    <span class="text-xs text-gray-400 w-20 truncate shrink-0">${escapeHtml(scheduleOrganizer(s) || '')}</span>
+                    <button type="button" data-fresh-ok onclick="event.stopPropagation(); calmMarkSeen(${jsArg(s.id)})" class="text-xs px-2 py-1 rounded border border-rose-300 text-rose-700 bg-white hover:bg-rose-100 shrink-0">확인</button>
+                </div>`;
+            }).join('');
+            box.innerHTML = `<div id="cal-fresh-bar" class="mb-3 rounded-lg border border-rose-200 bg-rose-50/60">
+                <div class="flex items-center gap-2 px-3 py-2 text-sm text-rose-800">
+                    <i class="fas fa-bell"></i><span>확인하지 않은 일정 <b>${list.length}</b>건</span>
+                    <button type="button" id="cal-fresh-open" onclick="calFreshOpen = !calFreshOpen; renderCalFreshBar()" class="ml-auto text-xs px-2.5 py-1 rounded border border-rose-300 bg-white hover:bg-rose-100">${calFreshOpen ? '접기' : '보기'}</button>
+                    <button type="button" id="cal-fresh-all" onclick="calmMarkAllSeen()" class="text-xs px-2.5 py-1 rounded bg-rose-600 text-white hover:bg-rose-700">모두 확인</button>
+                </div>
+                <div id="cal-fresh-panel" class="${calFreshOpen ? '' : 'hidden '}max-h-64 overflow-y-auto bg-white rounded-b-lg">${rows}</div>
+            </div>`;
+        }
+        function calmMarkSeen(id) { if (window.kobReads && id) kobReads.markAllSeen([scheduleMasterId(id)]); }
+        // 확인하지 않은 일정 칸이 있으면 그곳을, 없으면 오늘을 화면에 (캘린더 고를 때 · [오늘])
+        function calmScrollToFreshOrToday() {
+            requestAnimationFrame(() => {
+                const fr = document.getElementById('calm-fresh');
+                if (fr && fr.offsetParent !== null) fr.scrollIntoView({ block: 'start', behavior: 'auto' });
+                else scrollCalendarToToday();
+            });
+        }
+        function calmMarkAllSeen() {
+            const ids = calmFreshList().map(s => scheduleMasterId(s.id));
+            if (window.kobReads && ids.length) kobReads.markAllSeen(ids);
+        }
+        // 카드의 '확인 N' — 서버에서 숫자만 받아 채웁니다
+        function calmFillReadCounts(root) {
+            if (!window.kobReads) return;
+            const els = Array.from((root || document).querySelectorAll('[data-rc]'));
+            if (!els.length) return;
+            kobReads.counts(els.map(e => e.dataset.rc)).then(m => {
+                els.forEach(e => { const n = m.get(e.dataset.rc) || 0; e.textContent = n ? `확인 ${n}` : ''; });
+            }).catch(() => { });
+        }
+        // 홈 화면 아이콘 숫자 (안드로이드 · 아이폰 홈 화면 앱 — 지원하는 기기만)
+        function calmUpdateAppBadge() {
+            if (!isCalendarMode() || !navigator.setAppBadge) return;
+            const scopeInfo = getCalendarScopeFor(currentUserName, currentUserDept, currentUserLevel);
+            const n = Object.values(calNewCounts(getVisibleSchedules(scopeInfo))).reduce((a, b) => a + b, 0);
+            try { (n ? navigator.setAppBadge(n) : navigator.clearAppBadge()).catch(() => { }); } catch (e) { /* 지원 안 함 */ }
+        }
+
+        // ---------- 일정 상세의 '확인' 칸 (킹오더일정 · 2026-11-12) ----------
+        // 상세를 열면 내 확인을 남기고, 등록자 · 참석자에게는 확인한 사람 이름 · 시각을, 그 외에는 인원 수만 보여 줍니다.
+        function scheduleReadWhen(t) {
+            const d = new Date(t); if (isNaN(d)) return '';
+            const p = n => String(n).padStart(2, '0');
+            return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+        }
+        function renderScheduleReads(schedule) {
+            const box = document.getElementById('detail-schedule-reads');
+            if (!box) return;
+            if (!window.kobReads || !schedule || isBirthdaySchedule(schedule)) { box.classList.add('hidden'); return; }
+            const sid = scheduleMasterId(schedule.id);
+            const canList = scheduleMineAsOwner(schedule) || !!attendeeOf(schedule, currentUserName);
+            box.className = 'rounded-lg border border-gray-200 bg-gray-50 px-3 py-2';
+            box.innerHTML = '<p class="text-sm font-medium text-gray-500"><i class="fas fa-eye mr-1"></i>확인</p><p class="text-sm text-gray-400">불러오는 중…</p>';
+            kobReads.markSeen(sid).catch(() => { }).then(() => canList ? kobReads.readers(sid) : kobReads.counts([sid])).then(res => {
+                if (document.getElementById('schedule-detail-modal').classList.contains('hidden')) return;
+                if (canList) {
+                    const list = res || [];
+                    box.innerHTML = `<p class="text-sm font-medium text-gray-500"><i class="fas fa-eye mr-1"></i>확인 <b class="text-gray-800">${list.length}</b>명</p>`
+                        + (list.length ? `<div class="flex flex-wrap gap-1.5 mt-1">${list.map(r => `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-white border border-gray-200 text-xs text-gray-700">${escapeHtml(r.name || '')}<span class="text-gray-400 tabular-nums">${escapeHtml(scheduleReadWhen(r.first))}</span></span>`).join('')}</div>` : '');
+                } else {
+                    const n = (res && res.get(sid)) || 0;
+                    box.innerHTML = `<p class="text-sm font-medium text-gray-500"><i class="fas fa-eye mr-1"></i>확인 <b class="text-gray-800">${n}</b>명</p><p class="text-xs text-gray-400 mt-0.5">확인한 사람 목록은 등록자와 참석자만 볼 수 있습니다.</p>`;
+                }
+            }).catch(() => { box.classList.add('hidden'); });
+        }
+        function calmSyncBar() {
+            const listOpen = !!document.querySelector('#sec-calendar-center.calm-list-open');
+            const on = listOpen ? 'callist' : (calmTodayMode ? 'today' : 'sched');
+            document.querySelectorAll('#calm-bar [data-view]').forEach(b => b.classList.toggle('calm-on', b.dataset.view === on));
+            calmSyncCurCal();
+        }
+        function calmSetView(view) {
+            calmCloseCalList();
+            calmTodayMode = false;
+            setCalendarView(view);
+            const sel = document.getElementById('calendar-view-select');
+            if (sel && Array.from(sel.options).some(o => o.value === view)) sel.value = view;
+            if (view === 'list' || view === 'month') scrollCalendarToToday();
+        }
+        // ---------- 음성 일정 해석 시작 (2026-11-12) ----------
+        // 킹오더일정 실험실 — "내일 오후 3시 강남 고객사 미팅 김영업 초대" 같은 말을 일정 칸으로 나눕니다 (규칙 방식 · 휴대폰 안에서만, 비용 없음).
+        //   opt: { now: Date, names: [직원 이름], me: 내 이름 }
+        //   → { date:'YYYY-MM-DD', allDay, startTime, endTime, title, attendees:[이름], calendar }
+        // 한글 숫자 → 숫자 (11/16 진단 기록: 아이폰은 받아쓰는 중엔 '2시' 였다가 마지막 글자를 '두시' 로 줌)
+        //   시각: 한 · 두 · 세 · 네 · 다섯 … 열두 + 시(간)   /   날짜 · 분: 일 · 이 · 삼 … 십 · 이십오 + 월 · 일 · 분, 유월 · 시월
+        //   '일요일 · 오늘 · 일정 · 이번 · 시작 · 시연' 같은 낱말은 그대로 둡니다.
+        function normalizeVoiceNumbers(text) {
+            let t = String(text || '');
+            const NAT = { '한': 1, '두': 2, '세': 3, '네': 4, '다섯': 5, '여섯': 6, '일곱': 7, '여덟': 8, '아홉': 9, '열': 10, '열한': 11, '열두': 12 };
+            t = t.replace(/(^|[\s0-9]|오전|오후|아침|낮|저녁|밤|새벽|부터|까지)(열두|열한|다섯|여섯|일곱|여덟|아홉|열|한|두|세|네)\s*(?=시)(?!시(?:작|청|장|험|스|연|공|설|안|점|트|즌|각|계|민|외|내|도|적))/g,
+                (m, pre, w) => pre + NAT[w] + ' ');
+            t = t.replace(/(^|\s)유월/g, '$16월').replace(/(^|\s)시월/g, '$110월');
+            const D = { '일': 1, '이': 2, '삼': 3, '사': 4, '오': 5, '육': 6, '칠': 7, '팔': 8, '구': 9 };
+            t = t.replace(/(^|\s)((?:[이삼사오육칠팔구]?십)?[일이삼사오육칠팔구]?)\s*(?=(?:월|일|분)(?!장|정|요|자|반|부|과|상))/g, (m, pre, w, off, all) => {
+                if (!w) return m;
+                if (w === '일' && all.slice(off + m.length, off + m.length + 1) === '일' && !/월\s*$/.test(all.slice(0, off))) return m;   // '일일 점검' 은 그대로, '십이월 일일' 만 1일
+                const i = w.indexOf('십');
+                const n = i < 0 ? D[w] : (i ? D[w[0]] : 1) * 10 + (w[i + 1] ? D[w[i + 1]] : 0);
+                return pre + n;
+            });
+            return t;
+        }
+        function parseVoiceSchedule(text, opt) {
+            const o = opt || {};
+            const now = o.now ? new Date(o.now) : new Date();
+            const pad = (n) => String(n).padStart(2, '0');
+            const fmt = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+            const base = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+            let t = ' ' + normalizeVoiceNumbers(String(text || '').replace(/[.,!?·]/g, ' ').replace(/\s+/g, ' ').trim()).replace(/\s+/g, ' ') + ' ';
+            const cut = (re) => { const m = t.match(re); if (m) t = t.replace(m[0], ' '); return m; };
+            const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+            const WD = { '일': 0, '월': 1, '화': 2, '수': 3, '목': 4, '금': 5, '토': 6 };
+            // 1) 날짜
+            let date = null, m;
+            if ((m = cut(/(\d{1,2})\s*월\s*(\d{1,2})\s*일/))) {
+                let d = new Date(now.getFullYear(), +m[1] - 1, +m[2]);
+                if (d < base) d = new Date(now.getFullYear() + 1, +m[1] - 1, +m[2]);
+                date = d;
+            } else if ((m = cut(/(다음\s*주|담주|이번\s*주)\s*([일월화수목금토])요일/))) {
+                const monday = addDays(base, -((base.getDay() + 6) % 7));
+                date = addDays(monday, (/이번/.test(m[1]) ? 0 : 7) + ((WD[m[2]] + 6) % 7));
+            } else if ((m = cut(/([일월화수목금토])요일/))) {
+                let diff = (WD[m[1]] - base.getDay() + 7) % 7; if (diff === 0) diff = 7;
+                date = addDays(base, diff);
+            } else if ((m = cut(/(오늘|내일|낼|모레|글피)/))) {
+                date = addDays(base, { '오늘': 0, '내일': 1, '낼': 1, '모레': 2, '글피': 3 }[m[1]]);
+            } else if ((m = cut(/(?:^|\s)(\d{1,2})\s*일(?=\s|에|$)/))) {
+                let d = new Date(now.getFullYear(), now.getMonth(), +m[1]);
+                if (d < base) d = new Date(now.getFullYear(), now.getMonth() + 1, +m[1]);
+                date = d;
+            }
+            const hasDate = !!date;
+            if (!date) date = base;
+            // 2) 시간 — 오전 · 오후 없이 1~6시는 오후로 (업무 시간)
+            const AP = '(오전|오후|아침|낮|저녁|밤)?\\s*';
+            const toH = (ap, h) => {
+                h = +h;
+                if (ap === '오후' || ap === '저녁' || ap === '밤') return h < 12 ? h + 12 : h;
+                if (ap === '낮') return h < 7 ? h + 12 : h;
+                if (ap === '오전' || ap === '아침') return h === 12 ? 0 : h;
+                return (h >= 1 && h <= 6) ? h + 12 : h;
+            };
+            const toM = (half, mm) => half === '반' ? 30 : (mm ? +mm : 0);
+            const hm = (h, mi) => `${pad(Math.min(23, h))}:${pad(mi)}`;
+            let allDay = false, startTime = '', endTime = '';
+            if (cut(/하루\s*종일|종일/)) allDay = true;
+            const dur = cut(/(\d{1,2})\s*시간(\s*동안)?/);
+            const rng = cut(new RegExp(AP + '(\\d{1,2})\\s*시(?!간)\\s*(반|(\\d{1,2})\\s*분)?\\s*(부터|에서|~|-)\\s*' + AP + '(\\d{1,2})\\s*시(?!간)\\s*(반|(\\d{1,2})\\s*분)?\\s*(까지)?'));
+            if (!allDay && rng) {
+                const sh = toH(rng[1], rng[2]), sm = toM(rng[3], rng[4]);
+                let eh = toH(rng[6], rng[7]); const em = toM(rng[8], rng[9]);
+                if (eh * 60 + em <= sh * 60 + sm && eh < 12) eh += 12;
+                startTime = hm(sh, sm); endTime = hm(eh, em);
+            } else if (!allDay) {
+                const one = cut(new RegExp(AP + '(\\d{1,2})\\s*시(?!간)\\s*(반|(\\d{1,2})\\s*분)?\\s*(에)?'));
+                if (one) {
+                    const sh = toH(one[1], one[2]), sm = toM(one[3], one[4]);
+                    const add = dur ? +dur[1] * 60 : 60;
+                    const end = Math.min(23 * 60 + 55, sh * 60 + sm + add);
+                    startTime = hm(sh, sm); endTime = hm(Math.floor(end / 60), end % 60);
+                }
+            }
+            const hasTimeWord = allDay || !!startTime;
+            if (!startTime) allDay = true;
+            // 3) 캘린더 — '○○ 캘린더/일정' 은 제목에서 빼고, 낱말만 있으면 제목에 남깁니다
+            let calendar = 'team';
+            const calRules = [
+                [/(영업)\s*(캘린더|일정|공유)\s*(에|으로|로)?/, /영업/, 'sales-share'],
+                [/(설치|에이에스|A\/?S)\s*(캘린더|일정)\s*(에|으로|로)?/i, /설치|에이에스|A\/?S/i, 'install-as'],
+                [/(전사)\s*(캘린더|일정)\s*(에|으로|로)?/, /전사/, 'company'],
+                [/(개인)\s*(캘린더|일정)?\s*(에|으로|로)?/, null, 'personal'],
+                [/(팀)\s*(캘린더|일정)\s*(에|으로|로)?/, null, 'team']
+            ];
+            for (const [phrase, word, id] of calRules) {
+                if (phrase.test(t)) { calendar = id; t = t.replace(phrase, ' '); break; }
+                if (word && word.test(t)) { calendar = id; break; }
+            }
+            // 4) 참석자 — 긴 이름부터, 이름 뒤 '이랑 · 랑 · 과 · 와 · 하고 · 님 · 씨' 도 함께 뺍니다. 나 자신은 빼고.
+            const names = (o.names || []).filter(Boolean);
+            const found = new Set();
+            names.slice().sort((a, b) => b.length - a.length).forEach(n => {
+                const re = new RegExp(n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*(님|씨)?\\s*(이랑|랑|과|와|하고|이)?(?=\\s|$)', 'g');
+                if (re.test(t)) { t = t.replace(re, ' '); if (n !== o.me) found.add(n); }
+            });
+            // 성 없이 이름만 — '민수랑 · 민수 님' 처럼 붙인 말이 있거나 '초대 · 참석 · 같이 · 함께' 를 말했을 때만 (보통 낱말과 헷갈리지 않게)
+            const given = {};
+            names.forEach(n => { if (n === o.me || n.length < 3) return; [n.slice(1), n.length === 4 ? n.slice(2) : null].filter(Boolean).forEach(g => { (given[g] = given[g] || []).push(n); }); });
+            const askWord = /(초대|참석|같이|함께)/.test(t);
+            t = t.split(' ').map(w => {
+                const m = w.match(/^([가-힣]{2,3}?)(님|씨)?(이랑|랑|하고|과|와|도)?$/);
+                if (!m || !given[m[1]] || given[m[1]].length !== 1) return w;
+                if (!(m[2] || m[3] || askWord)) return w;
+                found.add(given[m[1]][0]); return '';
+            }).join(' ');
+            const attendees = names.filter(n => found.has(n));
+            // 5) 제목 — 남은 말에서 부탁하는 말 · 초대 같은 낱말을 뺍니다
+            t = t.replace(/\s(일정\s*)?(을|를)?\s*(등록|추가|생성|만들어|잡아|넣어)\s*(해)?\s*(줘요|줘|주세요|줄래)?(?=\s|$)/g, ' ')
+                 .replace(/\s(초대|참석|같이|함께|모두)(해\s*줘|해줘)?(?=\s|$)/g, ' ')
+                 .replace(/\s(일정)(?=\s|$)/g, ' ')
+                 .replace(/\s+/g, ' ').trim()
+                 .replace(/^(에서|에|은|는)\s+/, '').replace(/\s+(에서|에)$/, '');
+            return { date: fmt(date), allDay, startTime: allDay ? '' : startTime, endTime: allDay ? '' : endTime, title: t || '새 일정', attendees, calendar,
+                     hasDate, hasTime: hasTimeWord, hasTitle: !!t };
+        }
+        // 네 · 아니요 · 그만 알아듣기 → 'yes' | 'no' | 'cancel' | null
+        function parseVoiceYesNo(text) {
+            const t = String(text || '').replace(/[.,!?~]/g, ' ').replace(/\s+/g, ' ').trim();
+            if (!t) return null;
+            if (/^(취소|그만)/.test(t)) return 'cancel';
+            if (/^(아니|아뇨|노(?=\s|$)|no(?=\s|$)|없어|없습니다|없음|괜찮|됐어|됐습니다|안\s*(해|할|돼|넣)|필요\s*없)/i.test(t)) return 'no';
+            if (/^((네|넵|예|응|웅|어|엉)(?=\s|$|요)|그래|그렇게|좋아|좋습니다|맞아|맞습니다|오케이|ok(?=\s|$)|yes(?=\s|$)|등록|해\s*줘|해\s*주세요)/i.test(t)) return 'yes';
+            return null;
+        }
+        // 참석자 이름 찾기 — 직원 명단(조직도)에서. 성 없이 이름만 말해도 한 사람이면 찾습니다.
+        //   → { found:[이름], missing:[명단에 없는 이름], ambiguous:[{ tok, names }] (같은 이름이 여러 명) }
+        //   "추가해 줘 · 참석자로 · 님이요" 같은 덧붙인 말은 이름으로 보지 않습니다 (11/12 '찾지 못했습니다'가 함께 나오던 오류).
+        const VOICE_JOSA = ['이랑', '랑', '하고', '한테', '에게', '께', '과', '와', '이요', '이에요', '예요', '이야', '야', '은', '는', '이', '가', '도', '을', '를', '요', '만'];
+        const VOICE_NOT_NAME_WORD = /^(그리고|그럼|그냥|이렇게|저렇게|그분|그|저|나|제가|저도|분|사람|명|한|두|세|네|넵|예|응|어|엉|해|줘|님|씨|도|요|만|또|더|다|모두|전부|일단|우선|아|음|그래|맞아|좋아|오케이|참석자|참석|추가|초대|등록|같이|함께|부탁)$/;
+        const VOICE_NOT_NAME_HEAD = /^(참석|추가|초대|등록|넣|빼|불러|같이|함께|그리고|부탁|주세|해줘|해주)/;
+        const VOICE_VERB_TAIL = /(해|해요|해줘|줘|줘요|주세요|주세|합니다|할게|할게요|할래|하자|하겠|시켜|불러|넣어|가요|가자|있어|없어|입니다)$/;
+        function voiceNameCandidates(w) {
+            const out = [w];
+            const strip = (x) => VOICE_JOSA.filter(j => x.length > j.length && x.endsWith(j)).map(j => x.slice(0, -j.length));
+            strip(w).forEach(x => out.push(x));
+            out.slice().forEach(x => { if (/(님|씨)$/.test(x) && x.length > 1) out.push(x.slice(0, -1)); });
+            return [...new Set(out)].filter(x => /^[가-힣]{2,4}$/.test(x));
+        }
+        // 비슷한 이름 — 자음 · 모음으로 쪼개 비교 (ㅔ/ㅐ · ㅖ/ㅒ 는 같은 소리로). 받아쓰기가 '임희선' 을 '이미선' · '이혜선' 으로 적는 경우 (11/16 진단)
+        function voiceJamo(str) {
+            const CHO = 'ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ', JUNG = 'ㅏㅐㅑㅒㅓㅔㅕㅖㅗㅘㅙㅚㅛㅜㅝㅞㅟㅠㅡㅢㅣ';
+            const JONG = ['', 'ㄱ', 'ㄲ', 'ㄳ', 'ㄴ', 'ㄵ', 'ㄶ', 'ㄷ', 'ㄹ', 'ㄺ', 'ㄻ', 'ㄼ', 'ㄽ', 'ㄾ', 'ㄿ', 'ㅀ', 'ㅁ', 'ㅂ', 'ㅄ', 'ㅅ', 'ㅆ', 'ㅇ', 'ㅈ', 'ㅊ', 'ㅋ', 'ㅌ', 'ㅍ', 'ㅎ'];
+            return Array.from(String(str || '')).map(ch => {
+                const c = ch.charCodeAt(0) - 0xAC00;
+                return c >= 0 && c < 11172 ? CHO[Math.floor(c / 588)] + JUNG[Math.floor((c % 588) / 28)] + JONG[c % 28] : ch;
+            }).join('').replace(/ㅐ/g, 'ㅔ').replace(/ㅒ/g, 'ㅖ');
+        }
+        function voiceEditDist(a, b) {
+            const d = Array.from({ length: b.length + 1 }, (_, i) => i);
+            for (let i = 1; i <= a.length; i++) {
+                let p = d[0]; d[0] = i;
+                for (let j = 1; j <= b.length; j++) { const t = d[j]; d[j] = Math.min(d[j] + 1, d[j - 1] + 1, p + (a[i - 1] !== b[j - 1] ? 1 : 0)); p = t; }
+            }
+            return d[b.length];
+        }
+        // 가장 비슷한 한 사람 — 차이가 자모 2개 이하이고 두 번째로 비슷한 사람보다 확실히 가까울 때만
+        function voiceGuessName(tok, list, me) {
+            const q = voiceJamo(tok);
+            const scored = list.filter(n => n !== me && n.length >= 2 && Math.abs(n.length - tok.length) <= 1)
+                .map(n => ({ n, d: voiceEditDist(q, voiceJamo(n)) })).sort((a, b) => a.d - b.d);
+            if (!scored.length || scored[0].d > 2) return '';
+            if (scored[1] && scored[1].d <= scored[0].d) return '';
+            return scored[0].n;
+        }
+        function findVoiceAttendees(text, names, me) {
+            const list = (names || []).filter(Boolean);
+            let t = ' ' + String(text || '').replace(/[.,!?·]/g, ' ').replace(/\s+/g, ' ') + ' ';
+            const found = [], missing = [], ambiguous = [], guess = [];
+            const add = (n) => { if (n !== me && !found.includes(n)) found.push(n); };
+            list.slice().sort((a, b) => b.length - a.length).forEach(n => { if (t.includes(n)) { add(n); t = t.split(n).join(' '); } });
+            t.split(' ').filter(Boolean).forEach(w => {
+                if (VOICE_NOT_NAME_WORD.test(w) || VOICE_NOT_NAME_HEAD.test(w)) return;
+                const cands = voiceNameCandidates(w).filter(c => !VOICE_NOT_NAME_WORD.test(c));
+                for (const c of cands) {
+                    const hit = list.filter(n => n !== me && n.length > c.length && n.endsWith(c));
+                    if (hit.length === 1) { add(hit[0]); return; }
+                    if (hit.length > 1) { if (!ambiguous.some(x => x.tok === c)) ambiguous.push({ tok: c, names: hit }); return; }
+                }
+                if (VOICE_VERB_TAIL.test(w) || VOICE_JOSA.includes(w)) return;
+                let core = w.replace(/^(님|씨)/, '');      // '님이요 · 씨랑 · 명이요' 처럼 붙인 말만 남은 조각은 건너뜀
+                for (let k = 0; k < 3; k++) { const j = VOICE_JOSA.find(x => core.length > x.length && core.endsWith(x)); if (!j) break; core = core.slice(0, -j.length); }
+                if (core.length < 2 || VOICE_JOSA.includes(core) || VOICE_NOT_NAME_WORD.test(core)) return;
+                const tok = cands[cands.length - 1];          // 덧붙인 말을 뗀 가장 짧은 꼴
+                if (!tok || missing.includes(tok) || list.includes(tok) || tok === me) return;
+                const g = voiceGuessName(tok, list, me);
+                if (g && !found.includes(g) && !guess.some(x => x.name === g)) guess.push({ tok, name: g });
+                else if (!g) missing.push(tok);
+            });
+            return { found, missing, ambiguous, guess };
+        }
+        // 일정 읽어 주기 — "11월 13일 오후 3시, 강남 고객사 미팅. 참석자 김영업."
+        function voiceSummary(d) {
+            const [, mo, da] = String(d.date || '').split('-').map(Number);
+            let when = `${mo}월 ${da}일`;
+            if (d.allDay || !d.startTime) when += ' 종일';
+            else { const [h, mi] = d.startTime.split(':').map(Number); when += ` ${h < 12 ? '오전' : '오후'} ${h % 12 || 12}시` + (mi ? (mi === 30 ? ' 반' : ` ${mi}분`) : ''); }
+            return `${when}, ${d.title || '새 일정'}.` + ((d.attendees || []).length ? ` 참석자 ${d.attendees.join(', ')}.` : '');
+        }
+        // 음성 안내 묻고 답하기 — 한 번 말할 때마다 다음 차례를 정합니다 (화면 · 소리와 떨어진 순수 함수, 시험 가능)
+        //   state: null(처음) | { step, draft, silent, attDone }   heard: 들은 말('' = 아무 말 없음)
+        //   → { state, say:읽어 줄 말, listen:이어서 들을지, action: null | 'save' | 'edit' | 'end' | 'wait' }
+        function voiceDialogStep(state, heard, o) {
+            o = o || {};
+            const Q = {
+                what: '어떤 일정을 잡을까요? 날짜와 시간, 내용을 말씀해 주세요.',
+                when: '언제로 잡을까요? 날짜와 시간을 말씀해 주세요.',
+                title: '어떤 내용으로 일정을 잡을까요?',
+                att: '참석자 이름을 말씀해 주세요.',
+                'detail?': '세부내용을 등록하시겠어요?',
+                detail: '세부내용을 말씀해 주세요.'
+            };
+            const question = (st, s) => {
+                if (st === 'att?') return (s.draft.attendees.length ? `참석자 ${s.draft.attendees.join(', ')} 님. 참석자를 더 지정하시겠어요?` : '참석자를 지정하시겠어요?');
+                if (st === 'confirm') return voiceSummary(s.draft) + ' 이대로 일정을 등록할까요?';
+                if (st === 'attGuess') return `${((s.guess || [])[0] || {}).name || ''} 님이 맞나요?`;
+                return Q[st];
+            };
+            if (!state) return { state: { step: 'what', draft: null, silent: 0 }, say: Q.what, listen: true, action: null };
+            const s = JSON.parse(JSON.stringify(state));
+            const txt = String(heard || '').trim();
+            const ask = (st, pre) => { s.step = st; s.silent = 0; return { state: s, say: (pre ? pre + ' ' : '') + question(st, s), listen: true, action: null }; };
+            const next = (pre) => { const d = s.draft; if (!d.hasWhen) return ask('when', pre); if (!d.hasTitle) return ask('title', pre); if (!s.attDone) return ask('att?', pre); return ask('detail?', pre); };
+            const done = (action, say) => ({ state: s, say, listen: false, action });
+            if (!txt) {
+                s.silent = (s.silent || 0) + 1;
+                if (s.silent >= 2) return done('wait', '말씀이 들리지 않습니다. 마이크 단추를 누르거나 아래 칸에 입력해 주세요.');
+                return { state: s, say: '잘 듣지 못했습니다. ' + question(s.step, s), listen: true, action: null };
+            }
+            const yn = parseVoiceYesNo(txt);
+            if (yn === 'cancel') return done('end', '일정 만들기를 마칩니다.');
+            const P = (x) => parseVoiceSchedule(x, o);
+            const merge = (r) => { r.attendees.forEach(n => { if (!s.draft.attendees.includes(n)) s.draft.attendees.push(n); }); if (r.calendar !== 'team' && s.draft.calendar === 'team') s.draft.calendar = r.calendar; };
+            const takeWhen = (r) => { Object.assign(s.draft, { date: r.date, allDay: r.allDay, startTime: r.startTime, endTime: r.endTime, hasWhen: true }); };
+            const reaskYN = () => ({ state: s, say: '네 또는 아니요로 말씀해 주세요. ' + question(s.step, s), listen: true, action: null });
+            switch (s.step) {
+                case 'what': {
+                    const r = P(txt);
+                    s.draft = { date: r.date, allDay: r.allDay, startTime: r.startTime, endTime: r.endTime, title: r.hasTitle ? r.title : '', attendees: r.attendees.slice(),
+                                calendar: r.calendar, description: '', hasWhen: r.hasDate || r.hasTime, hasTitle: r.hasTitle };
+                    return next();
+                }
+                case 'when': {
+                    const r = P(txt);
+                    if (!r.hasDate && !r.hasTime) return { state: s, say: '날짜와 시간을 알아듣지 못했습니다. ' + Q.when, listen: true, action: null };
+                    takeWhen(r); merge(r);
+                    if (!s.draft.hasTitle && r.hasTitle) { s.draft.title = r.title; s.draft.hasTitle = true; }
+                    return next();
+                }
+                case 'title': {
+                    const r = P(txt);
+                    if (!s.draft.hasWhen && (r.hasDate || r.hasTime)) takeWhen(r);
+                    merge(r);
+                    s.draft.title = r.hasTitle ? r.title : txt; s.draft.hasTitle = true;
+                    return next();
+                }
+                case 'att?': {
+                    if (yn === 'no') { s.attDone = true; return next(); }
+                    if (yn === 'yes') return ask('att');
+                    const f = findVoiceAttendees(txt, o.names, o.me);   // "김영업" 처럼 이름을 바로 말하면 바로 찾기
+                    if (!f.found.length && !f.missing.length && !f.ambiguous.length && !f.guess.length) return reaskYN();
+                    s.step = 'att';
+                    return voiceDialogStep(s, txt, o);
+                }
+                case 'att': {
+                    const f = findVoiceAttendees(txt, o.names, o.me);
+                    if (!f.found.length && !f.missing.length && !f.ambiguous.length && !f.guess.length) return { state: s, say: '이름을 알아듣지 못했습니다. ' + Q.att, listen: true, action: null };
+                    const added = f.found.filter(n => !s.draft.attendees.includes(n));
+                    added.forEach(n => s.draft.attendees.push(n));
+                    const msg = [];
+                    if (added.length) msg.push(`${added.join(', ')} 님을 참석자로 추가했습니다.`);
+                    f.missing.forEach(n => { const c = n.charCodeAt(n.length - 1) - 0xAC00; msg.push(`참석자 ${n}${c >= 0 && c < 11172 && c % 28 ? '을' : '를'} 그룹웨어에서 찾지 못했습니다.`); });
+                    f.ambiguous.forEach(x => msg.push(`${x.tok} 님이 여러 명입니다. ${x.names.join(', ')} 중에서 성까지 말씀해 주세요.`));
+                    s.silent = 0;
+                    // 비슷한 이름 — 하나씩 "○○○ 님이 맞나요?" (여러 명 · 성까지 다시 묻기가 먼저)
+                    if (f.guess.length && !f.ambiguous.length) {
+                        s.step = 'attGuess'; s.guess = f.guess.slice();
+                        msg.push(`${s.guess[0].name} 님이 맞나요?`);
+                        return { state: s, say: msg.join(' '), listen: true, action: null, added, missing: f.missing };
+                    }
+                    if (f.ambiguous.length) { s.step = 'att'; return { state: s, say: msg.join(' '), listen: true, action: null, added, missing: f.missing }; }
+                    s.step = 'att?';
+                    return { state: s, say: msg.join(' ') + ' 참석자를 더 지정하시겠어요?', listen: true, action: null, added, missing: f.missing };
+                }
+                case 'attGuess': {
+                    const g = (s.guess || [])[0];
+                    if (!g) { s.step = 'att?'; return ask('att?'); }
+                    const josa = (n) => { const c = n.charCodeAt(n.length - 1) - 0xAC00; return c >= 0 && c < 11172 && c % 28 ? '을' : '를'; };
+                    let pre;
+                    if (yn === 'yes') { if (!s.draft.attendees.includes(g.name)) s.draft.attendees.push(g.name); pre = `${g.name} 님을 참석자로 추가했습니다.`; }
+                    else if (yn === 'no') pre = `참석자 ${g.tok}${josa(g.tok)} 그룹웨어에서 찾지 못했습니다.`;
+                    else { s.step = 'att'; s.guess = []; return voiceDialogStep(s, txt, o); }   // 다른 이름을 말하면 그 이름으로
+                    s.guess = s.guess.slice(1);
+                    if (s.guess.length) { s.silent = 0; return { state: s, say: `${pre} ${s.guess[0].name} 님이 맞나요?`, listen: true, action: null }; }
+                    s.step = 'att?'; s.silent = 0;
+                    return { state: s, say: pre + ' 참석자를 더 지정하시겠어요?', listen: true, action: null };
+                }
+                case 'detail?':
+                    if (yn === 'yes') return ask('detail');
+                    if (yn === 'no') return done('save', '바로 이 일정으로 등록하겠습니다.');
+                    return reaskYN();
+                case 'detail':
+                    s.draft.description = txt;
+                    return ask('confirm');
+                case 'confirm':
+                    if (yn === 'yes') return done('save', '일정을 등록하겠습니다.');
+                    if (yn === 'no') return done('edit', '입력창을 열어 드릴게요. 고칠 곳을 고친 뒤 등록하기를 눌러 주세요.');
+                    return reaskYN();
+            }
+            return done('end', '일정 만들기를 마칩니다.');
+        }
+        // ---------- 음성 일정 해석 끝 ----------
+
+        // ---------- 실험실 (2026-11-12) — 시험 중인 기능 켬/끔, 이 기기에 기억 ----------
+        function calmLabPrefs() { try { const p = JSON.parse(localStorage.getItem('kobCalmLab.v1') || '{}'); return (p && typeof p === 'object') ? p : {}; } catch (e) { return {}; } }
+        function calmSetLabValue(k, v) { const p = calmLabPrefs(); p[k] = v; try { localStorage.setItem('kobCalmLab.v1', JSON.stringify(p)); } catch (e) { } }
+        function calmSetLab(k, v) { calmSetLabValue(k, !!v); calmApplyLab(); }
+        // 음성 기능은 실험실 시험이 끝날 때까지 운영(prod)에서 숨김 (11/16 다니엘님). 운영에서 켜려면 설정에 voiceLab: true
+        function calmVoiceAllowed() { const c = window.KOB_CONFIG || {}; return c.env !== 'prod' || c.voiceLab === true; }
+        function calmApplyLab() {
+            const box = document.getElementById('calm-lab-voice-box'); if (box) box.classList.toggle('hidden', !calmVoiceAllowed());
+            const on = isCalendarMode() && calmLabPrefs().voice === true && calmVoiceAllowed();
+            const fab = document.getElementById('calm-voice-fab'); if (fab) fab.classList.toggle('hidden', !on);
+            const sw = document.getElementById('calm-lab-voice'); if (sw) sw.checked = calmLabPrefs().voice === true;
+            const sw2 = document.getElementById('calm-lab-talk'); if (sw2) sw2.checked = calmLabPrefs().talk === true;
+            const sw4 = document.getElementById('calm-lab-stt'); if (sw4) sw4.checked = calmLabPrefs().sttServer === true;
+            const sw3 = document.getElementById('calm-lab-tts'); if (sw3) sw3.checked = calmLabPrefs().talkTts !== false;   // 기본 켬 — 끄면 글자로만 물음(원인 확인용)
+        }
+        // 음성 받아쓰기 — 되는 브라우저(안드로이드 크롬 · 사파리)는 🎤 로 바로, 안 되면(아이폰 홈 화면 앱 등) 키보드의 🎤 받아쓰기로
+        // 11/12 다니엘님 "멈춰서 안 움직임": 아이폰 홈 화면 앱 등에서 받아쓰기가 시작만 되고 아무 소식이 없음
+        //   → 정해진 시간 안에 말이 안 들어오면 스스로 멈추고 키보드 받아쓰기 안내 · 이 기기에서 안 되는 것을 기억(voiceNative:false)
+        let calmRec = null, calmRecTimer = 0;
+        function calmSpeechCtor() { return window.SpeechRecognition || window.webkitSpeechRecognition || null; }
+        function calmVoiceWaitMs() { return Number(window.CALM_VOICE_WAIT_MS) || 7000; }
+        function calmVoiceKeyboardHint(msg) {
+            const st = document.getElementById('calm-voice-status'), ta = document.getElementById('calm-voice-text');
+            st.innerHTML = (msg ? escapeHtml(msg) + '<br>' : '') + '아래 칸을 누르고 <b>키보드의 🎤(받아쓰기)</b> 로 말해 주세요.';
+            setTimeout(() => { try { ta.focus(); } catch (e) { } }, 100);
+        }
+        function calmVoiceSetListening(on) {
+            document.getElementById('calm-voice-fab').classList.toggle('listening', on);
+            const b = document.getElementById('calm-voice-listen');
+            b.innerHTML = on ? '<i class="fas fa-stop mr-1"></i>멈추기' : '<i class="fas fa-microphone mr-1"></i>다시 듣기';
+        }
+        // 듣기를 끝냄 — 브라우저가 onend 를 안 보내도 화면은 반드시 풀립니다
+        function calmVoiceStop(reason) {
+            clearTimeout(calmRecTimer); calmRecTimer = 0;
+            const rec = calmRec; calmRec = null;
+            if (rec) { rec.onresult = rec.onerror = rec.onend = null; try { rec.abort(); } catch (e) { } }
+            const el = document.getElementById('calm-voice-fab'); if (!el) return;
+            calmVoiceSetListening(false);
+            const ta = document.getElementById('calm-voice-text'), st = document.getElementById('calm-voice-status');
+            if (reason === 'silent') { calmSetLabValue('voiceNative', false); calmVoiceKeyboardHint('이 화면에서는 바로 받아쓰기가 되지 않습니다.'); }
+            else if (reason === 'error') { /* 안내는 onerror 가 씀 */ }
+            else if (ta.value.trim()) st.textContent = '아래 내용이 맞는지 확인하고 [일정 만들기] 를 누르세요. 고칠 곳은 칸에서 바로 고칠 수 있습니다.';
+            else st.textContent = '멈췄습니다. [다시 듣기] 를 누르거나 직접 입력해 주세요.';
+        }
+        function calmOpenVoice() {
+            if (!calmVoiceAllowed()) return;
+            if (calmLabPrefs().talk === true) return calmOpenTalk();
+            const ta = document.getElementById('calm-voice-text'); ta.value = ''; calmVoicePreview();
+            document.getElementById('calm-voice-sheet').classList.remove('hidden');
+            const lb = document.getElementById('calm-voice-listen');
+            lb.classList.toggle('hidden', !calmSpeechCtor()); calmVoiceSetListening(false);
+            if (calmSpeechCtor() && calmLabPrefs().voiceNative !== false) calmVoiceListen();
+            else calmVoiceKeyboardHint(calmSpeechCtor() ? '이 기기에서는 바로 받아쓰기가 잘 되지 않았습니다. [다시 듣기] 로 다시 시도할 수 있습니다.' : '이 화면에서는 바로 받아쓰기를 쓸 수 없습니다.');
+        }
+        function calmCloseVoice() { calmVoiceStop('close'); document.getElementById('calm-voice-sheet').classList.add('hidden'); }
+        function calmVoiceListen() {
+            if (calmRec) { calmVoiceStop('user'); return; }        // 듣는 중에 누르면 [멈추기]
+            const C = calmSpeechCtor(); const st = document.getElementById('calm-voice-status'); const ta = document.getElementById('calm-voice-text');
+            if (!C) return;
+            let rec; try { rec = new C(); } catch (e) { calmVoiceKeyboardHint('받아쓰기를 시작하지 못했습니다.'); return; }
+            calmRec = rec; let heard = false;
+            rec.lang = 'ko-KR'; rec.interimResults = true; rec.continuous = false;
+            st.innerHTML = '<i class="fas fa-circle text-red-500 animate-pulse mr-1"></i>듣고 있습니다… 일정을 말해 주세요.';
+            calmVoiceSetListening(true);
+            const arm = (ms, why) => { clearTimeout(calmRecTimer); calmRecTimer = setTimeout(() => { if (calmRec === rec) calmVoiceStop(why); }, ms); };
+            arm(calmVoiceWaitMs(), 'silent');                      // 말이 하나도 안 들어오면 → 키보드 받아쓰기로
+            rec.onresult = (e) => {
+                if (calmRec !== rec) return;
+                ta.value = Array.from(e.results).map(r => r[0].transcript).join(' '); calmVoicePreview();
+                if (!heard) { heard = true; calmSetLabValue('voiceNative', true); }
+                arm(4000, 'done');                                  // 말이 멈추고 4초 지나도 안 끝나면 여기서 마침
+            };
+            rec.onerror = (e) => {
+                if (calmRec !== rec) return;
+                const err = e && e.error;
+                if (err === 'no-speech' || err === 'aborted') { calmVoiceStop(heard ? 'done' : 'user'); return; }
+                calmVoiceStop('error');
+                if (err === 'not-allowed' || err === 'service-not-allowed') { calmSetLabValue('voiceNative', false); calmVoiceKeyboardHint('마이크 사용이 허용되지 않았습니다. 휴대폰 설정에서 마이크를 허용하거나,'); }
+                else st.textContent = '잘 듣지 못했습니다. [다시 듣기] 를 누르거나 직접 입력해 주세요.';
+            };
+            rec.onend = () => { if (calmRec === rec) calmVoiceStop('done'); };
+            try { rec.start(); } catch (e) { calmVoiceStop('error'); calmVoiceKeyboardHint('받아쓰기를 시작하지 못했습니다.'); }
+        }
+        function calmVoiceParse() {
+            return parseVoiceSchedule(document.getElementById('calm-voice-text').value, { now: new Date(), names: pickableUsers().map(u => u.name), me: currentUserName });
+        }
+        function calmVoicePreview() {
+            const box = document.getElementById('calm-voice-preview'); if (!box) return;
+            const v = document.getElementById('calm-voice-text').value.trim();
+            if (!v) { box.innerHTML = ''; return; }
+            const r = calmVoiceParse();
+            box.innerHTML = `<div class="rounded-lg bg-gray-50 border border-gray-200 p-2 space-y-0.5">
+                <div><b>제목</b> ${escapeHtml(r.title)}</div>
+                <div><b>날짜</b> ${escapeHtml(r.date)} · ${r.allDay ? '종일' : escapeHtml(r.startTime + '~' + r.endTime)}</div>
+                <div><b>캘린더</b> ${escapeHtml(getCalendar(r.calendar).short)}${r.attendees.length ? ` · <b>참석자</b> ${escapeHtml(r.attendees.join(', '))}` : ''}</div></div>`;
+        }
+        // 일정 입력창을 채워 엽니다 — 저장은 사용자가 확인한 뒤 [등록하기] 로
+        function calmVoiceMake() {
+            const v = document.getElementById('calm-voice-text').value.trim();
+            if (!v) { document.getElementById('calm-voice-status').textContent = '말한 내용이 없습니다. [다시 듣기] 를 누르거나 직접 입력해 주세요.'; return; }
+            const r = calmVoiceParse();
+            calmCloseVoice();
+            calmVoiceFillModal(r, `음성 입력: ${v}`);
+        }
+        // 일정 입력창을 열어 음성으로 받은 내용을 채웁니다 (저장은 하지 않음)
+        function calmVoiceFillModal(r, desc) {
+            openScheduleModal(r.date);
+            const set = (id, val) => { const el = document.getElementById(id); if (el) el.value = val; };
+            const cal = document.getElementById('schedule-calendar');
+            if (cal && Array.from(cal.options).some(o => o.value === r.calendar)) { cal.value = r.calendar; if (typeof onScheduleCalendarChange === 'function') onScheduleCalendarChange(); }
+            set('schedule-title', r.title);
+            set('schedule-date', r.date); set('schedule-end-date', r.date);
+            if (typeof onScheduleDateChange === 'function') onScheduleDateChange();
+            const ad = document.getElementById('schedule-allday');
+            if (ad) { ad.checked = !!r.allDay; if (typeof onScheduleAllDayChange === 'function') onScheduleAllDayChange(); }
+            if (!r.allDay) { set('schedule-start-time', r.startTime); set('schedule-end-time', r.endTime); }
+            (r.attendees || []).forEach(n => toggleScheduleAttendee(n, true));
+            const d = document.getElementById('schedule-description'); if (d && !d.value && desc) d.value = desc;
+        }
+
+        // ---------- 음성 안내로 묻고 답하기 (2026-11-12 다니엘님 — 시리처럼) ----------
+        // 순서는 voiceDialogStep(순수 함수)이 정하고, 여기서는 읽어 주기(speechSynthesis) · 듣기(SpeechRecognition) · 화면만 맡습니다.
+        // 받아쓰기가 안 되는 기기(아이폰 홈 화면 앱 등)는 [네] · [아니요] · 입력칸(키보드 🎤)으로 똑같이 이어 갑니다.
+        let calmTalk = null;
+        function calmTalkOpts() { return { now: new Date(), names: pickableUsers().map(u => u.name), me: currentUserName }; }
+        function calmToast(msg) {
+            let el = document.getElementById('calm-toast');
+            if (!el) { el = document.createElement('div'); el.id = 'calm-toast'; el.className = 'calm-toast'; document.body.appendChild(el); }
+            el.textContent = msg; el.classList.remove('hidden'); clearTimeout(el._t); el._t = setTimeout(() => el.classList.add('hidden'), 3000);
+        }
+        // 소리로 읽기 — 끝나면 다음으로. 브라우저가 끝을 안 알려도 글자 수만큼 기다린 뒤 넘어갑니다.
+        //   11/12 "음성으로는 안내가 안 돼?": 아이폰 사파리는 cancel() 바로 뒤의 speak() 를 버리는 일이 있어, 읽는 중일 때만 멈추고 잠깐 뒤 읽습니다.
+        //   읽기가 시작(onstart)되지 않으면 무음 모드 · 음량 안내를 띄웁니다. 목소리 고르기에서 오류가 나도 읽기는 계속합니다.
+        //   11/12 아이폰 증상: '다 읽음(onend)' 신호를 빠뜨려 글자 수만큼 기다리던 것 → 읽는 중(speaking) 표시가 꺼지면 바로 끝으로 봄.
+        //   받아쓰기 직후 읽기가 소리 나지 않으면(시작 신호 없음) 한 번 다시 읽고, 그래도 안 되면 무음 안내 후 바로 다음으로.
+        let calmSayLast = '';
+        function calmSay(text, onSilent) {
+            calmSayLast = text;
+            return new Promise(res => {
+                const ss = window.speechSynthesis;
+                if (!ss || !window.SpeechSynthesisUtterance || window.CALM_TTS_OFF) return res();
+                if (calmLabPrefs().talkTts === false) { calmDiag('읽기 꺼짐 (글자로만)'); return res(); }
+                let fin = false, started = false, tries = 0;
+                const timers = [];
+                const later = (fn, ms) => timers.push(setTimeout(fn, ms));
+                const end = (why) => { if (fin) return; fin = true; timers.forEach(clearTimeout); clearInterval(poll); calmDiag('읽기 끝 (' + why + ')'); res(); };
+                later(() => end('시간'), 2500 + String(text).length * 200);
+                const go = () => {
+                    tries++;
+                    try {
+                        const u = new SpeechSynthesisUtterance(text); u.lang = 'ko-KR'; u.rate = 1.0; u.volume = 1;
+                        // 목소리는 고르지 않음 — 휴대폰 기본 한국어 목소리(첫 질문 목소리). 목록 첫 한국어 목소리는 Eddy 같은 기계음일 수 있음 (11/12 다니엘님)
+                        u.onstart = () => { started = true; calmDiag('읽기 소리 시작'); };
+                        u.onend = () => end('다 읽음');
+                        u.onerror = (e) => end('오류 ' + ((e && e.error) || ''));
+                        try { ss.resume(); } catch (e) { }
+                        calmDiag((tries > 1 ? '다시 읽기: ' : '읽기: ') + String(text).slice(0, 14));
+                        ss.speak(u);
+                    } catch (e) { end('오류'); }
+                };
+                // 읽는 중 표시가 꺼지면 끝 (onend 를 빠뜨리는 아이폰 대비)
+                let quiet = 0;
+                const poll = setInterval(() => {
+                    if (fin) return;
+                    let busy = false; try { busy = !!(ss.speaking || ss.pending); } catch (e) { }
+                    if (started && !busy) { if (++quiet >= 2) end('읽기 표시 꺼짐'); } else quiet = 0;
+                }, 150);
+                // 시작 신호가 없으면 한 번 다시 읽기 → 그래도 없으면 무음 안내 후 다음으로
+                later(() => {
+                    if (fin || started) return;
+                    let busy = false; try { busy = !!ss.speaking; } catch (e) { }
+                    if (busy) return;
+                    go();
+                    later(() => { if (fin || started) return; if (onSilent) onSilent(); end('소리 시작 안 됨'); }, 1000);
+                }, 1000);
+                if (ss.speaking || ss.pending) { try { ss.cancel(); } catch (e) { } later(go, 150); }
+                else go();                                           // 누른 그 순간 바로 (아이폰은 손가락으로 누른 때만 첫 소리를 냄)
+            });
+        }
+        // 알림음(삐) — 11/16 다니엘님 가이드: 질문을 다 읽으면 '지금 말하세요' 삐(낮은 음), 다 들으면 '잘 들었어요' 삐(높은 음).
+        //   파일 없이 코드로 짧게 만들고, 첫 🎤 터치 때 소리 장치를 열어 둡니다(아이폰은 첫 소리에 터치가 필요). 삐 뒤에는 장치를 쉬게 해 마이크와 겹치지 않게.
+        let calmAC = null;
+        function calmAudioUnlock() {
+            try {
+                const C = window.AudioContext || window.webkitAudioContext; if (!C) return;
+                if (!calmAC) calmAC = new C();
+                if (calmAC.resume) calmAC.resume();
+                const b = calmAC.createBuffer(1, 1, 22050), src = calmAC.createBufferSource();
+                src.buffer = b; src.connect(calmAC.destination); src.start(0);
+            } catch (e) { calmAC = null; }
+        }
+        function calmBeep(kind) {
+            return new Promise(res => {
+                const ac = calmAC; if (!ac) return res();
+                const go = () => {
+                    try {
+                        const o = ac.createOscillator(), g = ac.createGain(), t = ac.currentTime || 0;
+                        o.type = 'sine'; o.frequency.value = kind === 'end' ? 1320 : 880;
+                        g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.3, t + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.15);
+                        o.connect(g); g.connect(ac.destination); o.start(t); o.stop(t + 0.16);
+                        calmDiag(kind === 'end' ? '삐 (잘 들었어요)' : '삐 (말하세요)');
+                    } catch (e) { return res(); }
+                    setTimeout(() => { try { if (ac.suspend && !calmMic) ac.suspend(); } catch (e) { } res(); }, 260);   // 서버 받아쓰기 중엔 소리 크기를 재야 하므로 쉬지 않음   // 삐가 끝난 뒤에 다음 (녹음에 섞이지 않게)
+                };
+                let r = null; try { r = ac.state === 'suspended' && ac.resume ? ac.resume() : null; } catch (e) { }
+                if (r && r.then) r.then(go, go); else go();
+            });
+        }
+        // 받아쓰기가 완전히 닫힐 때까지 — 닫힌 신호(onend)를 기다림(최대 0.8초). 다음 질문 읽기 · 다음 듣기 전에.
+        let calmRecClosing = null;
+        function calmRecClosed() { return calmRecClosing || Promise.resolve(); }
+        // 진단 기록 — 창 아래 [진단 기록] 을 펼치면 읽기 · 듣기 순서와 시각이 보입니다 (아이폰 실물 확인용)
+        function calmDiagCopy() {
+            const box = document.getElementById('calm-talk-diag-list');
+            const lines = box ? Array.from(box.childNodes).map(n => n.textContent) : [];
+            const head = `킹오더일정 진단 기록 · ${new Date().toLocaleString('ko-KR')} · ${navigator.standalone ? '홈 화면 앱' : '브라우저'} · 질문 소리 ${calmLabPrefs().talkTts === false ? '끔' : '켬'}\n기기: ${navigator.userAgent}`;
+            const text = head + '\n' + lines.join('\n');
+            const done = () => calmToast('진단 기록을 복사했습니다. 대화창에 붙여 넣어 보내 주세요.');
+            const fallback = () => {
+                try { const ta = document.createElement('textarea'); ta.value = text; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); done(); }
+                catch (e) { calmToast('복사하지 못했습니다. 기록 화면을 캡처해 주세요.'); }
+            };
+            try { if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, fallback); else fallback(); } catch (e) { fallback(); }
+        }
+        function calmDiag(msg) {
+            const box = document.getElementById('calm-talk-diag-list'); if (!box) return;
+            const d = new Date(), p2 = n => String(n).padStart(2, '0');
+            const line = document.createElement('div');
+            line.textContent = `${p2(d.getMinutes())}:${p2(d.getSeconds())}.${String(d.getMilliseconds()).padStart(3, '0')} ${msg}`;
+            box.appendChild(line);
+            while (box.childNodes.length > 200) box.removeChild(box.firstChild);
+        }
+        function calmTalkReplay() { if (!calmSayLast) return; calmSay(calmSayLast, calmTalkMuteHint); }
+        function calmTalkMuteHint() { if (calmTalk) calmTalk.muted = true; calmTalkHint(CALM_MUTE_TEXT); }
+        function calmTalkLog(kind, text) {
+            const box = document.getElementById('calm-talk-log'); if (!box || !text) return;
+            const p = document.createElement('div'); p.className = kind === 'a' ? 'calm-talk-a' : 'calm-talk-q'; p.textContent = text;
+            box.appendChild(p); box.scrollTop = box.scrollHeight;
+        }
+        const CALM_MUTE_TEXT = '소리가 나지 않으면 휴대폰 무음(진동) 모드를 끄고 음량을 올린 뒤 🔊 를 눌러 주세요.';
+        function calmTalkHint(t) {
+            const h = document.getElementById('calm-talk-hint'); if (!h) return;
+            t = t || '';
+            if (calmTalk && calmTalk.muted && t.indexOf('무음') < 0) t = CALM_MUTE_TEXT + (t ? ' ' + t : '');   // 무음 안내는 다음 안내에 덮이지 않게
+            h.textContent = t;
+        }
+        function calmTalkMicOn(on) { const b = document.getElementById('calm-talk-mic'); if (b) b.classList.toggle('listening', !!on); }
+        function calmTalkStopRec() {
+            clearTimeout(calmRecTimer); calmRecTimer = 0;
+            const rec = calmRec; calmRec = null;
+            if (rec) {
+                rec.onresult = rec.onerror = rec.onaudiostart = rec.onsoundstart = rec.onspeechstart = null;
+                if (rec._ended) { rec.onend = null; calmRecClosing = null; }
+                else {
+                    const p = new Promise(done => {
+                        const t = setTimeout(() => { rec.onend = null; calmDiag('마이크 닫힘 (기다림 끝)'); done(); }, 800);
+                        rec.onend = () => { clearTimeout(t); rec.onend = null; calmDiag('마이크 닫힘'); done(); };
+                    });
+                    calmRecClosing = p; p.then(() => { if (calmRecClosing === p) calmRecClosing = null; });
+                    try { rec.abort(); } catch (e) { }
+                }
+            }
+            calmTalkMicOn(false);
+        }
+        function calmOpenTalk() {
+            calmTalkStopRec();
+            document.getElementById('calm-talk-log').innerHTML = '';
+            document.getElementById('calm-talk-input').value = '';
+            const dg = document.getElementById('calm-talk-diag-list'); if (dg) dg.innerHTML = '';
+            calmDiag('시작 — ' + (navigator.standalone ? '홈 화면 앱' : '브라우저') + ' · 받아쓰기 ' + (calmSpeechCtor() ? '있음' : '없음'));
+            document.getElementById('calm-talk-sheet').classList.remove('hidden');
+            calmTalk = { state: null, seq: 0 };
+            calmAudioUnlock();                                          // 첫 터치 때 삐 소리 장치를 열어 둠
+            if (calmLabPrefs().sttServer === true && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) calmMicOpen().catch(() => { });   // 서버 받아쓰기 — 마이크도 첫 터치 때
+            calmTalkRun(voiceDialogStep(null, null, calmTalkOpts()));   // 첫 읽기는 누른 그 순간에 (아이폰은 손가락으로 누른 때만 소리를 냄)
+        }
+        function calmCloseTalk() {
+            calmTalk = null; calmTalkStopRec(); calmMicClose();
+            try { if (window.speechSynthesis) speechSynthesis.cancel(); } catch (e) { }
+            document.getElementById('calm-talk-sheet').classList.add('hidden');
+        }
+        function calmTalkRun(res) {
+            if (!calmTalk) return;
+            calmTalk.state = res.state; const my = ++calmTalk.seq;
+            calmTalkLog('q', res.say);
+            calmTalkHint(res.action === 'wait' ? '마이크 단추를 누르고 말하거나, 아래 칸에 입력해 [보내기] 를 눌러 주세요.' : '');
+            calmSay(res.say, () => { if (calmTalk && calmTalk.seq === my) calmTalkMuteHint(); }).then(() => {
+                if (!calmTalk || calmTalk.seq !== my) return;
+                if (res.action === 'save') return calmTalkSave(false);
+                if (res.action === 'edit') return calmTalkSave(true);
+                if (res.action === 'end') return setTimeout(calmCloseTalk, 400);
+                if (!res.listen) return;
+                // 읽기가 끝나면 → 마이크가 완전히 닫혔는지 확인 → 시작 삐 → 삐가 끝난 뒤 듣기 (11/16 가이드 ①②③)
+                calmRecClosed().then(() => (calmTalk && calmTalk.seq === my) ? calmBeep('start') : null).then(() => {
+                    if (calmTalk && calmTalk.seq === my) calmTalkListen(my, false);
+                });
+            });
+        }
+        // 한 번 듣기 — 말이 끝나면 그 말로 다음 차례. 아무 말 없으면 '' (한 번 더 묻기), 받아쓰기를 못 쓰면 입력으로 기다림
+        // ---------- 서버 받아쓰기 (2026-11-16 다니엘님 — 가이드의 다음 단계) ----------
+        // 아이폰 웹 받아쓰기는 두 번째부터 말소리를 못 받음(진단 기록) → 마이크는 처음 🎤 때 한 번만 열고 창을 닫을 때까지 씀.
+        // 대답마다 녹음 → 소리 크기로 말 끝을 판단(말이 멈추고 1.2초) → /api/stt 로 보내 글자로 받음. 직원 이름은 서버가 함께 넘김.
+        let calmMic = null, calmMicOpening = null;
+        function calmMicOpen() {
+            if (calmMic && calmMic.stream.getAudioTracks().some(t => t.readyState === 'live')) return Promise.resolve(calmMic);
+            if (!calmMicOpening) calmMicOpening = calmMicOpenNow().finally(() => { calmMicOpening = null; });   // 여는 중이면 같이 기다림 (허용 창이 떠 있는 동안 두 번 열지 않게)
+            return calmMicOpening;
+        }
+        async function calmMicOpenNow() {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+            if (!calmTalk) { try { stream.getTracks().forEach(t => t.stop()); } catch (e) { } throw new Error('창이 닫힘'); }
+            calmAudioUnlock();
+            let an = null;
+            try { if (calmAC.resume) calmAC.resume(); const src = calmAC.createMediaStreamSource(stream); an = calmAC.createAnalyser(); an.fftSize = 1024; src.connect(an); } catch (e) { an = null; }
+            calmMic = { stream, an };
+            calmDiag('마이크 열림 (창을 닫을 때까지 씀)' + (an ? '' : ' · 소리 크기 못 잼'));
+            return calmMic;
+        }
+        function calmMicClose() {
+            if (!calmMic) return;
+            try { calmMic.stream.getTracks().forEach(t => t.stop()); } catch (e) { }
+            calmMic = null; calmDiag('마이크 끔');
+        }
+        async function calmSttToken() {
+            try { const c = window.kobSupabase; if (!c) return ''; const { data } = await c.auth.getSession(); return (data && data.session && data.session.access_token) || ''; } catch (e) { return ''; }
+        }
+        function calmServerListen(my) {
+            calmTalkStopRec();
+            const job = { _ended: true, aborted: false, abort() { this.aborted = true; if (this.stop) this.stop(); } };
+            calmRec = job;
+            calmTalkMicOn(true); calmTalkHint('듣고 있습니다…');
+            const finish = (text) => {
+                if (calmRec === job) { calmRec = null; calmTalkMicOn(false); }
+                if (job.aborted || !calmTalk || calmTalk.seq !== my) return;
+                calmDiag('들은 말: ' + (text || '(없음)'));
+                calmTalkAnswer(text, true);
+            };
+            calmMicOpen().then(mic => {
+                if (job.aborted || !calmTalk || calmTalk.seq !== my) return;
+                const type = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm'].find(t => window.MediaRecorder && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t)) || '';
+                let mr; try { mr = new MediaRecorder(mic.stream, type ? { mimeType: type } : undefined); } catch (e) { calmDiag('녹음 시작 못 함: ' + e.message); calmTalkHint('녹음을 시작하지 못했습니다. 아래 칸에 입력해 주세요.'); if (calmRec === job) { calmRec = null; calmTalkMicOn(false); } return; }
+                const chunks = []; mr.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+                const t0 = Date.now(); let spoke = !mic.an, lastLoud = t0, floor = null, why = '';
+                const buf = mic.an ? new Float32Array(mic.an.fftSize) : null;
+                const end = (w) => { if (why) return; why = w; clearInterval(tick); calmDiag('녹음 끝 (' + w + ', ' + (Date.now() - t0) + 'ms)'); try { mr.stop(); } catch (e) { } };
+                job.stop = () => end('멈춤');
+                const tick = setInterval(() => {
+                    const now = Date.now();
+                    if (mic.an) {
+                        mic.an.getFloatTimeDomainData(buf); let sum = 0; for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+                        const rms = Math.sqrt(sum / buf.length);
+                        floor = floor === null ? rms : (rms < floor ? rms : floor + (rms - floor) * 0.02);   // 주변 소리 크기 (천천히 따라감)
+                        if (rms > Math.max(0.012, floor * 3)) { if (!spoke) calmDiag('말소리 감지 (녹음)'); spoke = true; lastLoud = now; }
+                    }
+                    if (mic.an && spoke && now - lastLoud > 1200) end('말 끝');
+                    else if (!spoke && now - t0 > calmVoiceWaitMs()) end('말 없음');
+                    else if (now - t0 > (mic.an ? 15000 : 6000)) end('시간');
+                }, 100);
+                mr.onstop = () => {
+                    if (job.aborted || !calmTalk || calmTalk.seq !== my) return;
+                    if (!spoke || why === '말 없음') return finish('');
+                    const blob = new Blob(chunks, { type: mr.mimeType || type || 'audio/mp4' });
+                    calmTalkHint('알아듣는 중…');
+                    calmDiag('서버로 보냄 ' + Math.round(blob.size / 1024) + 'KB');
+                    const s0 = Date.now();
+                    calmSttToken().then(tok => fetch(((window.KOB_CONFIG || {}).apiBase || '') + '/api/stt', {
+                        method: 'POST', headers: Object.assign({ 'Content-Type': blob.type || 'audio/mp4' }, tok ? { Authorization: 'Bearer ' + tok } : {}), body: blob
+                    })).then(r => r.json().then(j => ({ status: r.status, j }))).then(({ status, j }) => {
+                        if (job.aborted || !calmTalk || calmTalk.seq !== my) return;
+                        calmDiag('서버 결과 (' + (Date.now() - s0) + 'ms): ' + (j && j.ok ? (j.text || '(빈 글자)') : ('오류 ' + status + ' ' + ((j && j.error) || ''))));
+                        if (j && j.ok) return finish(j.text || '');
+                        if (calmRec === job) { calmRec = null; calmTalkMicOn(false); }
+                        calmTalkHint(j && j.error === 'no-key' ? '서버 받아쓰기 열쇠가 아직 설정되지 않았습니다. 실험실에서 서버 받아쓰기를 끄거나 아래 칸으로 답해 주세요.'
+                            : '서버 받아쓰기에 실패했습니다. 🎤 를 눌러 다시 말하거나 아래 칸으로 답해 주세요.');
+                    }).catch(e => {
+                        calmDiag('서버로 못 보냄: ' + (e && e.message));
+                        if (calmRec === job) { calmRec = null; calmTalkMicOn(false); }
+                        calmTalkHint('인터넷 연결을 확인해 주세요. 🎤 를 눌러 다시 말하거나 아래 칸으로 답해 주세요.');
+                    });
+                };
+                mr.start(250);
+                calmDiag('녹음 시작' + (type ? ' (' + type + ')' : ''));
+            }).catch(e => {
+                calmDiag('마이크 못 엶: ' + ((e && (e.name || e.message)) || ''));
+                if (calmRec === job) { calmRec = null; calmTalkMicOn(false); }
+                calmTalkHint('마이크를 열지 못했습니다. 마이크 사용을 허용한 뒤 🎤 를 누르거나 아래 칸으로 답해 주세요.');
+            });
+        }
+        //   11/12 아이폰 증상: 받아쓰기가 소리를 받기도 전에 꺼지면(aborted · audio-capture 등) '아무 말 없음' 이 아니라 '받아쓰기 실패' →
+        //   0.5초 뒤 한 번 다시 듣고, 또 안 되면 '잘 듣지 못했습니다' 되묻기 없이 🎤 · 입력 안내만 합니다.
+        function calmTalkListen(my, byTap, retry) {
+            if (calmLabPrefs().sttServer === true && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) return calmServerListen(my);
+            const C = calmSpeechCtor();
+            if (!C || (!byTap && calmLabPrefs().voiceNative === false)) { calmTalkHint('[네] · [아니요] 를 누르거나, 아래 칸을 누르고 키보드 🎤(받아쓰기) 로 말한 뒤 [보내기] 를 눌러 주세요.'); return; }
+            calmTalkStopRec();
+            let rec; try { rec = new C(); } catch (e) { calmTalkHint('받아쓰기를 시작하지 못했습니다. 아래 칸에 입력해 주세요.'); return; }
+            calmRec = rec; let last = '', fin = false, gotAudio = false;
+            const t0 = Date.now();
+            const finish = (text) => {
+                if (fin) return; fin = true;
+                if (calmRec === rec) calmTalkStopRec();
+                if (!calmTalk || calmTalk.seq !== my) return;
+                if (text === null) return;
+                calmDiag('들은 말: ' + (text || '(없음)'));
+                calmTalkAnswer(text, true);
+            };
+            const fail = (why) => {
+                if (fin) return; fin = true;
+                if (calmRec === rec) calmTalkStopRec();
+                calmDiag('받아쓰기 실패: ' + why + ' (' + (Date.now() - t0) + 'ms)');
+                if (!calmTalk || calmTalk.seq !== my) return;
+                if (!retry) { calmTalkHint('다시 듣는 중…'); setTimeout(() => { if (calmTalk && calmTalk.seq === my) calmTalkListen(my, byTap, 1); }, 500); return; }
+                calmTalkHint('받아쓰기가 잠시 안 됩니다. 🎤 를 눌러 다시 말하거나, [네] · [아니요] 또는 아래 칸으로 답해 주세요.');
+            };
+            const arm = (ms) => { clearTimeout(calmRecTimer); calmRecTimer = setTimeout(() => { if (last || gotAudio) finish(last); else fail('소식 없음'); }, ms); };
+            rec.lang = 'ko-KR'; rec.interimResults = true; rec.continuous = false;
+            // 무엇까지 왔는지 따로 기록 — 마이크 켜짐(소리 받을 준비) · 소리 감지(소리가 들어옴) · 말소리 감지(말로 알아봄) · 결과
+            const heard = (k) => () => { calmDiag('듣기: ' + k); gotAudio = true; };
+            rec.onaudiostart = heard('마이크 켜짐'); rec.onsoundstart = heard('소리 감지'); rec.onspeechstart = heard('말소리 감지');
+            rec.onspeechend = () => calmDiag('듣기: 말소리 끝'); rec.onsoundend = () => calmDiag('듣기: 소리 끝'); rec.onaudioend = () => calmDiag('듣기: 마이크 꺼짐');
+            rec.onnomatch = () => calmDiag('듣기: 알아듣지 못함(nomatch)');
+            rec.onresult = (e) => {
+                gotAudio = true; const rs = Array.from(e.results);
+                last = rs.map(r => r[0].transcript).join(' ').trim(); document.getElementById('calm-talk-input').value = last; if (last) calmSetLabValue('voiceNative', true);
+                const isFinal = rs.length && rs[rs.length - 1].isFinal === true;
+                calmDiag(`결과 ${rs.length}개${isFinal ? '(끝)' : ''}: ${last || '(빈 글자)'}`);
+                arm(isFinal && last ? 300 : 2500);                       // '말 끝남' 표시가 오면 바로, 아니면 2.5초 더 들어 봄
+            };
+            rec.onerror = (e) => {
+                const err = e && e.error;
+                calmDiag('듣기 오류: ' + err);
+                if (err === 'not-allowed' || err === 'service-not-allowed') { calmSetLabValue('voiceNative', false); calmTalkHint('마이크 사용이 허용되지 않았습니다. [네] · [아니요] 나 아래 칸으로 답해 주세요.'); finish(null); return; }
+                if (last) return finish(last);
+                if (err === 'no-speech') return finish('');
+                fail(err || '오류');
+            };
+            rec.onend = () => { rec._ended = true; calmDiag('듣기 끝'); if (last || gotAudio) finish(last); else fail('바로 꺼짐'); };
+            calmTalkMicOn(true); calmTalkHint('듣고 있습니다…');
+            arm(calmVoiceWaitMs());
+            calmDiag('듣기 시작' + (retry ? ' (다시)' : ''));
+            try { rec.start(); } catch (e) { fail('시작 못 함'); }
+        }
+        // 🎤 — 읽는 중이면 읽기를 멈추고 바로 듣기. 차례 번호를 올려 멈춘 읽기 뒤의 '삐 → 듣기' 가 또 시작되지 않게 (11/16 진단: 듣기가 두 번 겹침)
+        function calmTalkMic() {
+            if (!calmTalk) return;
+            if (calmRec) { calmTalkStopRec(); calmTalkHint(''); return; }
+            const my = ++calmTalk.seq;
+            try { if (window.speechSynthesis) speechSynthesis.cancel(); } catch (e) { }
+            calmTalkListen(my, true);
+        }
+        function calmTalkSend() { const i = document.getElementById('calm-talk-input'); const v = i.value.trim(); if (!v) return; calmTalkAnswer(v); }
+        function calmTalkAnswer(text, fromVoice) {
+            if (!calmTalk) return;
+            calmTalkStopRec();
+            const v = String(text || '').trim();
+            document.getElementById('calm-talk-input').value = '';
+            calmTalkLog('a', v);
+            const res = voiceDialogStep(calmTalk.state, v, calmTalkOpts());
+            // 받아쓰기로 답했으면 → 종료 삐 → 마이크가 완전히 닫힌 뒤 다음 질문 읽기 (아이폰은 마이크 직후 읽기 소리를 버리는 일이 있음)
+            const seq = calmTalk.seq;
+            const run = () => { if (calmTalk && calmTalk.seq === seq) calmTalkRun(res); };
+            if (fromVoice) Promise.all([v ? calmBeep('end') : null, calmRecClosed()]).then(run);
+            else if (calmRecClosing) calmRecClosed().then(run);
+            else run();                                                  // 단추 · 입력으로 답하면 누른 그 순간 읽기
+        }
+        // 등록 — 그룹웨어 입력창을 채워 [등록하기] 와 똑같이 저장 (초대 알림 · 새 일정 알림 · 확인 검사 모두 같은 길)
+        function calmTalkSave(editOnly) {
+            const d = calmTalk && calmTalk.state && calmTalk.state.draft; if (!d) return;
+            calmCloseTalk();
+            calmVoiceFillModal(d, d.description || '');
+            if (editOnly) return;
+            const form = document.getElementById('schedule-form');
+            try { form.requestSubmit ? form.requestSubmit() : form.dispatchEvent(new Event('submit', { cancelable: true })); } catch (e) { }
+            const modal = document.getElementById('schedule-modal');
+            if (modal.classList.contains('hidden')) calmToast(`일정을 등록했습니다 — ${voiceSummary(d)}`);
+            else calmToast('확인할 곳이 있어 입력창을 열어 두었습니다.');
+        }
+
+        // ---------- 설정 › 일정 표시 방법 (2026-11-12 다니엘님) — 이 기기에 기억합니다 ----------
+        const CALM_VIEW_KEY = 'kobCalmView.v1';
+        const CALM_VIEWS = ['month', 'day', 'day3', 'list', 'week'];
+        // 화면 맨 처음(currentCalendarView 정할 때)에도 불리므로 위 상수에 기대지 않습니다
+        function calmPreferredView() {
+            try { const v = localStorage.getItem('kobCalmView.v1'); if (['month', 'day', 'day3', 'list', 'week'].includes(v)) return v; } catch (e) { /* 저장소를 못 쓰면 기본 */ }
+            return 'list';
+        }
+        function calmChooseView(v) {
+            if (!CALM_VIEWS.includes(v)) return;
+            try { localStorage.setItem(CALM_VIEW_KEY, v); } catch (e) { /* 이번만 */ }
+            calmCloseSettings();
+            calmSetView(v);
+        }
+        // 시간 단위(3일) — 보고 있는 날부터 3일을 나란히, 시간대별 줄 (종일 일정은 맨 위)
+        function renderCalendarDay3(grid, dayHeader, monthYearText, list) {
+            const WD = ['일', '월', '화', '수', '목', '금', '토'];
+            const days = [0, 1, 2].map(k => { const d = new Date(currentDate); d.setDate(d.getDate() + k); return d; });
+            const ds = days.map(ymd), today = ymd(new Date()), nowH = new Date().getHours();
+            const a = days[0], b = days[2];
+            monthYearText.innerText = `${a.getMonth() + 1}월 ${a.getDate()}일 ~ ${b.getMonth() !== a.getMonth() ? (b.getMonth() + 1) + '월 ' : ''}${b.getDate()}일`;
+            grid.className = 'bg-white';
+            if (dayHeader) dayHeader.style.display = 'none';
+            const on = (d) => list.filter(s => s.date === d).sort(compareScheduleTime);
+            let html = '<div class="calm-d3"><div class="calm-d3-t"></div>' + days.map((d, i) => {
+                const hol = gwHolidayName(ds[i]); const wd = d.getDay();
+                const col = hol || wd === 0 ? ' style="color:#ef4444"' : wd === 6 ? ' style="color:#3b82f6"' : '';
+                return `<div data-day3="${ds[i]}" class="calm-d3-h${ds[i] === today ? ' today' : ''}"${ds[i] === today ? '' : col} onclick="openDaySummaryModal(${jsArg(ds[i])})">${d.getDate()} (${WD[wd]})${hol ? `<div class="text-[10px] font-normal truncate">${escapeHtml(hol)}</div>` : ''}</div>`;
+            }).join('');
+            html += '<div class="calm-d3-t">종일</div>' + ds.map(d => `<div class="calm-d3-c" data-day3-cell="${d}|allday">${on(d).filter(isAllDaySchedule).map(s => scheduleChipHtml(s)).join('')}</div>`).join('');
+            html += '</div><div id="cal-day-timeline" class="calm-d3 max-h-[60vh] overflow-y-auto">';
+            for (let h = 0; h < 24; h++) {
+                html += `<div class="calm-d3-t">${String(h).padStart(2, '0')}:00</div>` + ds.map(d => {
+                    const inH = on(d).filter(s => !isAllDaySchedule(s) && Math.floor(scheduleStartMinutes(s) / 60) === h);
+                    return `<div class="calm-d3-c${d === today && h === nowH ? ' now' : ''}" data-day3-cell="${d}|${h}">${inH.map(s => scheduleChipHtml(s)).join('')}</div>`;
+                }).join('');
+            }
+            grid.innerHTML = html + '</div>';
+            const tl = document.getElementById('cal-day-timeline');
+            if (tl) {
+                const firsts = ds.flatMap(on).filter(s => !isAllDaySchedule(s)).map(s => Math.floor(scheduleStartMinutes(s) / 60));
+                const focus = ds.includes(today) ? nowH : (firsts.length ? Math.min(...firsts) : 8);
+                tl.scrollTop = Math.max(0, (focus - 1) * 45);
+            }
+        }
+
+        // ---------- 필터 설정 (2026-11-12 다니엘님 샘플) — 이 기기에 기억합니다 ----------
+        //   show: { 캘린더 id: false } 끈 캘린더 · holiday: 공휴일 표시 · names: 필터 이름 표시 · rows: 펼칠 때 줄 수
+        const CALM_FILTER_KEY = 'kobCalmFilter.v1';
+        const CALM_FILTER_ORDER = ['sales-share', 'install-as', 'company', 'team', 'personal', 'birthday'];
+        function calmFilterPrefs() {
+            let p = null; try { p = JSON.parse(localStorage.getItem('kobCalmFilter.v1') || 'null'); } catch (e) { p = null; }
+            p = (p && typeof p === 'object') ? p : {};
+            return { show: (p.show && typeof p.show === 'object') ? p.show : {}, holiday: p.holiday !== false, names: p.names !== false, rows: Math.min(6, Math.max(1, Number(p.rows) || 4)), dept: typeof p.dept === 'string' ? p.dept : '' };
+        }
+        function calmSaveFilterPrefs(p) { try { localStorage.setItem(CALM_FILTER_KEY, JSON.stringify(p)); } catch (e) { /* 이번만 */ } calmApplyFilterPrefs(); }
+        // 저장한 부서 · 줄 수를 화면에 얹고 다시 그립니다 · [필터] 단추 강조 (꺼 둔 캘린더 · 공휴일 · 부서가 있으면)
+        function calmApplyFilterPrefs() {
+            const p = calmFilterPrefs();
+            const ds = document.getElementById('calendar-filter-dept');
+            if (ds) { if (p.dept && !Array.from(ds.options).some(o => o.value === p.dept)) { /* 없는 부서면 전체 */ } else ds.value = p.dept; }
+            calmApplyLegendRows();
+            const on = !!p.dept || !p.holiday || Object.values(p.show).some(v => v === false);
+            const btn = document.getElementById('calm-filter-btn'); if (btn) btn.classList.toggle('calm-filter-on', on);
+            renderCalendar();
+        }
+        function calmDeptOptionsHtml(cur) {
+            const ds = document.getElementById('calendar-filter-dept');
+            const opts = ds ? Array.from(ds.options).map(o => [o.value, o.textContent]) : [['', '전체 부서']];
+            return opts.map(([v, t]) => `<option value="${escapeHtml(v)}" ${v === (cur || '') ? 'selected' : ''}>${escapeHtml(t)}</option>`).join('');
+        }
+        function calmCalShown(id) { return calmFilterPrefs().show[id] !== false; }
+        function calmApplyLegendRows() { const lg = document.getElementById('calendar-legend'); if (lg) lg.style.setProperty('--calm-rows', calmFilterPrefs().rows); }
+        function calmToggleLegend() { calmApplyLegendRows(); const lg = document.getElementById('calendar-legend'); if (lg) lg.classList.toggle('calm-legend-open'); }
+        function calmFilterIcon(id) {
+            if (id === 'holiday') return '<span class="calm-fs-ico bg-red-500"><i class="fas fa-flag"></i></span>';
+            const c = getCalendar(id);
+            if (id === 'sales-share' || id === 'company') return '<span class="calm-fs-ico border border-gray-200"><img src="image/logo.png" alt=""></span>';
+            return `<span class="calm-fs-ico ${c.swatch}"><i class="fas ${c.icon}"></i></span>`;
+        }
+        let calmFilterPage = 'main';
+        function calmOpenFilterSheet() { calmFilterPage = 'main'; calmRenderFilterSheet(); document.getElementById('calm-filter-sheet').classList.remove('hidden'); }
+        function calmCloseFilterSheet() { document.getElementById('calm-filter-sheet').classList.add('hidden'); }
+        function calmFilterBack() { if (calmFilterPage === 'pick') { calmFilterPage = 'main'; calmRenderFilterSheet(); } else calmCloseFilterSheet(); }
+        function calmRenderFilterSheet() {
+            const p = calmFilterPrefs();
+            const body = document.getElementById('calm-filter-body'); if (!body) return;
+            const back = document.getElementById('calm-filter-back');
+            if (back) back.innerHTML = calmFilterPage === 'pick' ? '<i class="fas fa-arrow-left"></i>' : '<i class="fas fa-xmark"></i>';
+            document.getElementById('calm-filter-title').textContent = calmFilterPage === 'pick' ? '표시할 필터를 선택' : '필터 설정';
+            const nameOf = (id) => id === 'holiday' ? '대한민국 공휴일' : getCalendar(id).name;
+            if (calmFilterPage === 'main') {
+                const shown = CALM_FILTER_ORDER.filter(id => p.show[id] !== false).concat(p.holiday ? ['holiday'] : []);
+                body.innerHTML = `<div class="calm-fs-group">표시 설정</div>
+                    <div class="calm-fs-card">
+                        <label class="calm-fs-row">필터 이름 표시<span class="ml-auto calm-switch"><input type="checkbox" id="calm-filter-names" ${p.names ? 'checked' : ''} onchange="calmSetFilterOpt('names', this.checked)"><span></span></span></label>
+                        <label class="calm-fs-row">필터 영역 확대 시 표시할 줄 수
+                            <select id="calm-filter-rows" class="ml-auto bg-transparent text-gray-500 text-[15px]" onchange="calmSetFilterOpt('rows', Number(this.value))">${[1, 2, 3, 4, 5, 6].map(n => `<option value="${n}" ${p.rows === n ? 'selected' : ''}>${n}줄</option>`).join('')}</select></label>
+                    </div>
+                    <div class="calm-fs-group">부서</div>
+                    <div class="calm-fs-card">
+                        <label class="calm-fs-row">표시할 부서
+                            <select id="calm-filter-dept" class="ml-auto bg-transparent text-gray-600 text-[15px] max-w-[55%]" onchange="calmSetFilterOpt('dept', this.value)">${calmDeptOptionsHtml(p.dept)}</select></label>
+                        ${manageableScheduleDepts().length ? `<button type="button" class="calm-fs-row" onclick="calmCloseFilterSheet(); openScheduleTypeModal(document.getElementById('calendar-filter-dept').value)"><i class="fas fa-sliders text-gray-500"></i>구분 관리<i class="fas fa-chevron-right ml-auto text-gray-300"></i></button>` : ''}
+                    </div>
+                    <div class="calm-fs-group">필터 리스트</div>
+                    <div class="calm-fs-card">${shown.length ? shown.map(id => `<div class="calm-fs-row" data-filter-row="${id}">${calmFilterIcon(id)}<span class="truncate">${escapeHtml(nameOf(id))}</span></div>`).join('') : '<div class="calm-fs-row text-gray-400">표시할 필터가 없습니다</div>'}</div>
+                    <p class="calm-fs-note">'표시할 필터를 선택'을 눌러 필터를 추가하거나 뺄 수 있습니다. 켠 캘린더의 일정만 화면에 표시됩니다.</p>
+                    <div class="calm-fs-card"><button type="button" id="calm-filter-pick-btn" class="calm-fs-row" onclick="calmFilterPage='pick'; calmRenderFilterSheet()">표시할 필터를 선택<i class="fas fa-chevron-right ml-auto text-gray-300"></i></button></div>`;
+            } else {
+                const tog = (id, on) => `<label class="calm-fs-row">${calmFilterIcon(id)}<span class="flex-1 min-w-0 truncate">${escapeHtml(nameOf(id))}</span><span class="calm-switch"><input type="checkbox" data-filter-cal="${id}" ${on ? 'checked' : ''}><span></span></span></label>`;
+                body.innerHTML = `<div class="calm-fs-group">킹오더 캘린더</div>
+                    <div class="calm-fs-card">${CALM_FILTER_ORDER.map(id => tog(id, p.show[id] !== false)).join('')}</div>
+                    <div class="calm-fs-group">조회</div>
+                    <div class="calm-fs-card">${tog('holiday', p.holiday)}</div>
+                    <div class="px-3 pb-3 pt-1" style="padding-bottom:calc(12px + env(safe-area-inset-bottom, 0px))"><button type="button" id="calm-filter-save" onclick="calmSaveFilterPick()" class="w-full py-3.5 rounded-xl bg-gray-900 text-white font-semibold">저장</button></div>`;
+            }
+        }
+        function calmSetFilterOpt(k, v) { const p = calmFilterPrefs(); p[k] = v; calmSaveFilterPrefs(p); }
+        function calmSaveFilterPick() {
+            const p = calmFilterPrefs();
+            document.querySelectorAll('#calm-filter-body input[data-filter-cal]').forEach(t => {
+                if (t.dataset.filterCal === 'holiday') p.holiday = t.checked;
+                else if (t.checked) delete p.show[t.dataset.filterCal]; else p.show[t.dataset.filterCal] = false;
+            });
+            // 지금 고른 캘린더(위 줄)를 껐으면 전체로
+            const sel = document.getElementById('calendar-filter-cal'); if (sel && sel.value && p.show[sel.value] === false) sel.value = '';
+            calmSaveFilterPrefs(p);
+            calmFilterPage = 'main'; calmRenderFilterSheet();
+        }
+
+        // ---------- 캘린더 리스트 (2026-11-12 다니엘님 샘플) ----------
+        // 캘린더마다 이름 · 보는 사람 · 새 일정(New)을 보여 주고, 누르면 그 캘린더 일정만 월 보기로 엽니다.
+        let calmListTab = 'all';
+        const CALM_LIST_TABS = [['all', '전체'], ['share', '공유'], ['mine', '내 캘린더']];
+        function calmStaffUsers() {
+            const ext = new Set((typeof orgDepts !== 'undefined' ? orgDepts : []).filter(d => d.external).map(d => d.id).concat(['vendor']));
+            const extGroup = (u) => (typeof userGroupIds === 'function' ? userGroupIds(u) : [u.groupId]).some(id => ((typeof permissionGroups !== 'undefined' ? permissionGroups : []).find(g => g.id === id) || {}).external);
+            return (typeof localUsers !== 'undefined' ? localUsers : []).filter(u => u && u.id && !isResigned(u) && !ext.has(u.dept) && !extGroup(u));
+        }
+        // 그 캘린더를 함께 보는 사람 — 공유 = 전 직원, 팀별 = 우리 부서, 개인 = 나
+        function calmCalMembers(cal) {
+            const staff = calmStaffUsers();
+            if (cal.share === 'self') return staff.filter(u => u.name === currentUserName);
+            if (cal.share === 'dept') return staff.filter(u => u.dept === currentUserDept);
+            return staff;
+        }
+        function calmAvatarHtml(u) {
+            const photo = (u && u.photo) || '';
+            const st = (typeof orgDeptStyle === 'function') ? orgDeptStyle(u.dept) : { avatar: 'bg-slate-400' };
+            return photo ? `<img data-member src="${escapeHtml(photo)}" alt="${escapeHtml(u.name || '')}" class="calm-cl-av">`
+                : `<span data-member class="calm-cl-av ${st.avatar}">${escapeHtml(String(u.name || '?').charAt(0))}</span>`;
+        }
+        function calmCalTile(cal) {
+            if (cal.id === 'sales-share' || cal.id === 'company') return `<span class="calm-cl-tile border border-gray-200"><img src="image/logo.png" alt=""></span>`;
+            return `<span class="calm-cl-tile ${cal.swatch}"><i class="fas ${cal.icon}"></i></span>`;
+        }
+        function calmRenderCalList(fresh) {
+            if (!isCalendarMode()) return;
+            const scopeInfo = getCalendarScopeFor(currentUserName, currentUserDept, currentUserLevel);
+            const counts = fresh || calNewCounts(getVisibleSchedules(scopeInfo));
+            const anyNew = Object.values(counts).some(n => n > 0);
+            const dot = document.querySelector('#calm-bar [data-view="callist"] .calm-dot');
+            if (dot) dot.classList.toggle('hidden', !anyNew);
+            const box = document.getElementById('calm-callist');
+            if (!box) return;
+            const ORDER = ['sales-share', 'install-as', 'company', 'team', 'personal', 'birthday'];   // 공유 캘린더 먼저 (샘플)
+            const list = CALENDARS.slice().sort((a, b) => ORDER.indexOf(a.id) - ORDER.indexOf(b.id))
+                .filter(c => calmListTab === 'all' || (calmListTab === 'share' ? c.share === 'all' : c.share !== 'all'));
+            const items = list.map(c => {
+                const mem = calmCalMembers(c);
+                const faces = mem.slice(0, 7).map(calmAvatarHtml).join('') + (mem.length > 7 ? `<span class="calm-cl-more">+${mem.length - 7}</span>` : '');
+                const sub = c.auto ? `<div class="calm-cl-desc">${escapeHtml(c.desc)}</div>` : `<div class="calm-cl-members">${faces}</div>`;
+                const n = counts[c.id] || 0;
+                return `<button type="button" data-cal-item="${c.id}" class="calm-cl-item" onclick="calmPickCalendar(${jsArg(c.id)})">
+                    ${calmCalTile(c)}
+                    <span class="flex-1 min-w-0"><div class="calm-cl-name">${escapeHtml(c.name)}</div>${sub}</span>
+                    ${n ? `<span class="calm-cl-new" title="확인하지 않은 일정 ${n}건">New</span>` : ''}
+                    <i class="fas fa-chevron-right text-gray-300"></i>
+                </button>`;
+            }).join('');
+            box.innerHTML = `<div class="calm-cl-tabs">${CALM_LIST_TABS.map(([id, nm]) => `<button type="button" class="${calmListTab === id ? 'on' : ''}" onclick="calmCalListTab(${jsArg(id)})">${nm}</button>`).join('')}</div>
+                <div class="calm-cl-head">캘린더 (${list.length})</div>${items}`;
+        }
+        function calmCalListTab(tab) { calmListTab = tab; calmRenderCalList(); }
+        function calmOpenCalList() {
+            calmTodayMode = false;
+            document.getElementById('sec-calendar-center').classList.add('calm-list-open');
+            document.getElementById('calm-callist').classList.remove('hidden');
+            calmRenderCalList();
+            document.querySelectorAll('#calm-bar [data-view]').forEach(b => b.classList.toggle('calm-on', b.dataset.view === 'callist'));
+            const ms = document.getElementById('main-scroll'); if (ms) ms.scrollTop = 0;
+        }
+        function calmCloseCalList() {
+            document.getElementById('sec-calendar-center').classList.remove('calm-list-open');
+            document.getElementById('calm-callist').classList.add('hidden');
+        }
+        function calmSyncCurCal() {
+            const el = document.getElementById('calm-cur-cal'); if (!el) return;
+            const id = (document.getElementById('calendar-filter-cal') || {}).value || '';
+            el.innerHTML = `${escapeHtml(id ? getCalendar(id).name : '전체 캘린더')} <i class="fas fa-caret-down"></i>`;
+        }
+        // 캘린더를 고르면 그 캘린더 일정만 — 날짜별 목록을 오늘 위치로, 확인하지 않은 일정을 먼저 (2026-11-16 다니엘님)
+        function calmPickCalendar(id) {
+            const sel = document.getElementById('calendar-filter-cal');
+            if (sel) { if (!Array.from(sel.options).some(o => o.value === id)) fillCalendarFilterSelect(); sel.value = id; }
+            calmCloseCalList();
+            currentDate = new Date();
+            setCalendarView('list');
+            calmTodayMode = false; calmSyncBar();
+            calmScrollToFreshOrToday();
+        }
+        function calmShowAll() { const sel = document.getElementById('calendar-filter-cal'); if (sel) sel.value = ''; calmCloseCalList(); renderCalendar(); }
+        // [오늘] — 날짜별 목록(리스트)을 오늘 위치로 엽니다. 설정의 표시 방법은 바꾸지 않습니다 (2026-11-12 다니엘님)
+        let calmTodayMode = false;
+        function calmShowToday() {
+            calmCloseCalList();
+            currentDate = new Date();
+            setCalendarView('list');
+            calmTodayMode = true; calmSyncBar();
+            calmScrollToFreshOrToday();
+        }
+        function calmToggleFilters() { document.getElementById('sec-calendar-center').classList.toggle('calm-filters-open'); }
+        function calmOpenSettings() {
+            const n = document.getElementById('calm-me-name'); if (n) n.textContent = `${currentUserName || ''}`;
+            calmApplyLab();
+            const pv = calmPreferredView();
+            document.querySelectorAll('#calm-view-opts input[name="calm-view"]').forEach(o => { o.checked = o.value === pv; });
+            document.getElementById('calm-settings').classList.remove('hidden');
+            if (typeof calmRenderNotiSettings === 'function') calmRenderNotiSettings();
+        }
+        function calmCloseSettings() { document.getElementById('calm-settings').classList.add('hidden'); }
+        // 설정 › 알림 — 이 기기에서 받기 + 캘린더별 새 일정 알림 켬/끔 (처음엔 팀별만). 초대 · 취소 · 시작 전 알림은 따로 늘 옵니다.
+        const CAL_NEW_PUSH_IDS = ['team', 'sales-share', 'install-as', 'company'];
+        async function calmRenderNotiSettings() {
+            const box = document.getElementById('calm-noti');
+            if (!box) return;
+            let st = { supported: false, subscribed: false, ios: false, standalone: false, ready: false };
+            let calNew = { team: true, 'sales-share': false, 'install-as': false, company: false };
+            const remote = !!(window.kobPush && kobPush.remote);
+            if (remote) {
+                try { st = await kobPush.state(); } catch (e) { /* 그대로 */ }
+                try { const j = await kobPush.status(); if (j && j.calNew) calNew = Object.assign(calNew, j.calNew); } catch (e) { /* 기본값 */ }
+            }
+            const on = remote && st.subscribed;
+            const head = !remote ? '<p class="text-xs text-gray-500">알림은 서버에 연결된 환경에서 사용할 수 있습니다.</p>'
+                : on ? '<p class="text-sm text-emerald-700"><i class="fas fa-circle-check mr-1"></i>이 기기에서 알림을 받고 있습니다.</p>'
+                : `<button type="button" class="w-full py-3 rounded-lg bg-gray-800 text-white font-semibold" onclick="calmEnablePush()"><i class="fas fa-bell mr-1"></i>이 기기에서 알림 받기</button><p id="calm-noti-msg" class="text-xs text-red-600 mt-1"></p>`;
+            const rows = CAL_NEW_PUSH_IDS.map(id => {
+                const cal = getCalendar(id);
+                return `<label class="flex items-center justify-between py-2.5 border-t border-gray-100 text-[15px]">
+                    <span><i class="fas ${cal.icon} mr-2 ${cal.text}"></i>${escapeHtml(cal.short)}</span>
+                    <input type="checkbox" data-cal="${id}" ${calNew[id] ? 'checked' : ''} ${on ? '' : 'disabled'} onchange="calmSetCalNew(this)" class="w-5 h-5">
+                </label>`;
+            }).join('');
+            box.innerHTML = `<div class="py-2">
+                <p class="font-semibold text-gray-800 mb-2"><i class="fas fa-bell mr-1"></i>알림</p>
+                ${head}
+                <p class="text-sm text-gray-600 mt-3 mb-1">새 일정 알림 받을 캘린더</p>
+                ${rows}
+                <p class="text-xs text-gray-500 mt-2">초대 · 일정 취소 · 시작 전 알림은 캘린더 설정과 관계없이 받습니다.</p>
+                <p class="text-xs text-gray-500 mt-1"><i class="fab fa-apple mr-1"></i>아이폰: 사파리에서 [공유 › 홈 화면에 추가] 후, 홈 화면에 추가한 킹오더일정 아이콘으로 열어야 알림을 받을 수 있습니다. (iOS 16.4 이상)</p>
+            </div>`;
+        }
+        async function calmEnablePush() {
+            const msg = document.getElementById('calm-noti-msg');
+            try { await kobPush.enable(); } catch (e) { if (msg) msg.textContent = String(e && e.message || e); return; }
+            calmRenderNotiSettings();
+        }
+        async function calmSetCalNew(el) {
+            const id = el.dataset.cal, v = el.checked;
+            try { await kobPush.setPrefs({ calNew: { [id]: v } }); }
+            catch (e) { el.checked = !v; alert('알림 설정을 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.'); }
+        }
+
         function scrollCalendarToToday() {
             requestAnimationFrame(() => {
                 const cell = document.querySelector('#cal-grid [data-today="1"]');
@@ -19774,12 +21419,14 @@ const QUOTE_TEMPLATES = [
             scrollCalendarToToday();
         }
         function changeDate(delta) { 
-            if (currentCalendarView === 'month') {
+            if (currentCalendarView === 'month' || currentCalendarView === 'list') {
                 currentDate.setMonth(currentDate.getMonth() + delta); 
             } else if (currentCalendarView === 'week') {
                 currentDate.setDate(currentDate.getDate() + (delta * 7));
             } else if (currentCalendarView === 'day') {
                 currentDate.setDate(currentDate.getDate() + delta);
+            } else if (currentCalendarView === 'day3') {
+                currentDate.setDate(currentDate.getDate() + (delta * 3));
             }
             renderCalendar(); 
         }
@@ -19809,7 +21456,16 @@ const QUOTE_TEMPLATES = [
             if (ba) ba.classList.toggle('hidden', isIos);
             if (bi) bi.classList.toggle('hidden', !isIos);
         }
+        // 킹오더일정 주소 (2026-11-12)
+        function calendarModeUrl() { return `${location.origin}${location.pathname}?mode=calendar`; }
+        function copyCalendarModeUrl() {
+            const url = calendarModeUrl();
+            const done = () => alert('킹오더일정 주소를 복사했습니다.');
+            if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(url).then(done).catch(() => prompt('아래 주소를 복사해 주세요.', url));
+            else prompt('아래 주소를 복사해 주세요.', url);
+        }
         function openPhoneSyncHelp() {
+            const cu = document.getElementById('calm-url'); if (cu) cu.textContent = calendarModeUrl();
             setPhoneSyncOs(phoneSyncGuessOs());
             const m = document.getElementById('phone-sync-modal');
             if (m) m.classList.remove('hidden');
@@ -20250,15 +21906,25 @@ const QUOTE_TEMPLATES = [
                 if (before && before.recur && before.recur.offDates && before.date === data.date) recur.offDates = Object.assign({}, before.recur.offDates);
             }
             data.recur = recur;
+            let inviteBefore = null, inviteAfter = null;   // 초대 알림 (2026-11-12)
             if (id) {
                 const schedule = schedules.find(s => s.id === id);
                 if (schedule && !canEditSchedule(schedule)) { alert('이 일정은 수정할 수 없습니다. 다른 사람의 개인 일정은 조회만 가능합니다.'); return; }
-                if (schedule) Object.assign(schedule, data);
+                if (schedule) { inviteBefore = JSON.parse(JSON.stringify(schedule)); Object.assign(schedule, data); inviteAfter = schedule; }
             } else {
-                schedules.push({ id: nextScheduleId(), salesperson: currentUserName || document.getElementById('user-name').innerText,
-                                 createdBy: String(currentUserEmail || '').toLowerCase(), ...data });
+                inviteAfter = { id: nextScheduleId(), salesperson: currentUserName || document.getElementById('user-name').innerText,
+                                 createdBy: String(currentUserEmail || '').toLowerCase(), ...data };
+                schedules.push(inviteAfter);
             }
+            if (inviteAfter) stampScheduleInvites(inviteBefore, inviteAfter);
             saveSchedules();
+            if (inviteAfter) notifyScheduleInvites(inviteBefore, inviteAfter);
+            // 새 일정 알림 — 받는 사람(캘린더 · 부서 · 각자 켬/끔)은 서버가 고릅니다. 저장이 서버에 닿을 시간을 두고 부릅니다.
+            if (!inviteBefore && inviteAfter && window.kobPush && kobPush.scheduleNew && CAL_NEW_PUSH_IDS.includes(scheduleCalendarId(inviteAfter))) {
+                const nid = inviteAfter.id;
+                const viewers = scheduleNewViewers(inviteAfter);   // 볼 수 있는 사람만 (서버가 부서 · 전 직원 기준과 한 번 더 겹쳐 봄)
+                setTimeout(() => kobPush.scheduleNew(nid, viewers).catch(e => console.warn('[새 일정 알림] 보내지 못했습니다', e && e.message)), 1500);
+            }
             closeScheduleModal();
             renderCalendar();
             if (typeof renderTodaySchedule === 'function') renderTodaySchedule(currentUserName);
@@ -20266,7 +21932,9 @@ const QUOTE_TEMPLATES = [
         // 일정 알림을 누르면 — 일정캘린더로 가서 그 일정을 엽니다 (2026-10-23)
         function openScheduleFromNotice(id) {
             try { navigate('calendar-center', document.getElementById('nav-calendar-center')); } catch (e) { /* 화면 권한이 없으면 상세만 */ }
-            if (!findScheduleForView(id)) { alert('일정을 찾을 수 없습니다. 삭제되었거나 변경되었을 수 있습니다.'); return; }
+            const found = findScheduleForView(id);
+            if (!found) { alert('일정을 찾을 수 없습니다. 삭제되었거나 변경되었을 수 있습니다.'); return; }
+            if (!isBirthdaySchedule(found) && !canViewSchedule(found)) { alert('조회 권한이 없는 일정입니다.'); return; }   // 주소 · 알림으로 남의 일정을 열지 않게 (2026-11-12 검토)
             openScheduleDetailModal(id);
         }
         function openScheduleDetailModal(id) {
@@ -20328,6 +21996,7 @@ const QUOTE_TEMPLATES = [
 
             renderScheduleAttendeeDetail(schedule);
             document.getElementById('schedule-detail-modal').classList.remove('hidden');
+            renderScheduleReads(schedule);   // 확인 기록 남기기 · 확인한 사람 (킹오더일정 · 2026-11-12)
         }
 
         // 상세 모달의 참석자 목록 + 내 응답 영역
@@ -20339,6 +22008,9 @@ const QUOTE_TEMPLATES = [
             const box = document.getElementById('detail-schedule-attendees');
             const summary = document.getElementById('detail-schedule-attendee-summary');
 
+            // 초대한 사람 — 나를 넣은 사람(없으면 주최자) (킹오더일정 · 2026-11-12)
+            const inviteBy = document.getElementById('detail-invite-by');
+            if (inviteBy) { const mine = attendeeOf(schedule, currentUserName); const who = (mine && mine.invitedBy) || scheduleOrganizer(schedule); inviteBy.innerHTML = who ? `<b>${escapeHtml(who)}</b> 님이 이 일정에 초대했습니다.` : '이 일정에 초대되었습니다.'; }
             row.classList.toggle('hidden', list.length === 0);
             if (list.length) {
                 // 스스로 참가한 사람은 응답 집계에서 빼고 '참가'로 따로 센다
@@ -20358,8 +22030,9 @@ const QUOTE_TEMPLATES = [
                         // 스스로 참가한 사람은 응답 절차가 없으므로 '참가'로만 표시한다
                         const icon = a.self ? 'fa-user-check' : st.icon;
                         const label = a.self ? '참가' : st.name;
+                        const by = (!a.self && a.invitedBy && a.invitedBy !== organizer) ? ` <span class="opacity-60">· ${escapeHtml(a.invitedBy)} 초대</span>` : '';   // 주최자가 아닌 사람이 초대했으면 (2026-11-12)
                         return `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs ${st.chip}${me}">
-                                <i class="fas ${icon}"></i>${escapeHtml(a.name)} <span class="opacity-70">${label}</span>
+                                <i class="fas ${icon}"></i>${escapeHtml(a.name)} <span class="opacity-70">${label}</span>${by}
                             </span>`;
                     }).join('');
             }
@@ -20493,6 +22166,34 @@ const QUOTE_TEMPLATES = [
             }));
             return to.length;
         }
+        // ---------- 일정 초대 알림 시작 (2026-11-12) ----------
+        // 킹오더일정 — 구글 캘린더는 킹오더 계정 하나로 보내서 누가 초대했는지 알 수 없었습니다.
+        // 참석자를 새로 넣은 사람을 참석자 정보(invitedBy · invitedAt)에 남기고, 그 사람 이름으로 초대 알림을 보냅니다.
+        //   · 저장 전후를 견주어 새로 들어온 사람만 (다시 저장해도 기존 참석자에게는 안 감)
+        //   · 스스로 참가(self) · 나 자신 · 취소 · 삭제된 일정은 빼고
+        function newScheduleInvitees(before, after) {
+            const had = new Set((Array.isArray(before && before.attendees) ? before.attendees : []).map(a => a && a.name));
+            return (Array.isArray(after && after.attendees) ? after.attendees : [])
+                .filter(a => a && a.name && !had.has(a.name) && !a.self && a.name !== currentUserName);
+        }
+        function stampScheduleInvites(before, after) {
+            const t = new Date().toISOString();
+            newScheduleInvitees(before, after).forEach(a => { if (!a.invitedBy) { a.invitedBy = currentUserName || ''; a.invitedAt = t; } });
+        }
+        function notifyScheduleInvites(before, after) {
+            if (!after || after.offState) return 0;
+            const list = newScheduleInvitees(before, after);
+            const when = `${after.date || ''} ${scheduleTimeLabel(after)}`.trim();
+            const calName = (scheduleCalendar(after) || {}).short || '';
+            list.forEach(a => pushNotification({
+                id: 'cnoti_' + collabNotiIdCounter++, type: 'schedule-invite', title: after.title || '일정', toUser: a.name, toDept: '', toTeam: '',
+                scheduleId: after.id, by: a.invitedBy || currentUserName || '',
+                detail: `${a.invitedBy || currentUserName || ''} 님이 초대 · ${when}${calName ? ' · ' + calName : ''}`,
+                date: ymd(new Date()), read: false
+            }));
+            return list.length;
+        }
+        // ---------- 일정 초대 알림 끝 ----------
         // 반복 일정이면 '이 날만 / 전체' 를 묻습니다 — 'one' · 'all' · '' (그만둠)
         function askScheduleScope(schedule, day, verb) {
             if (!isRecurring(schedule)) return confirm(`이 일정을 ${verb}하시겠습니까?`) ? 'all' : '';
@@ -61058,6 +62759,16 @@ await fetch('${escapeHtml(url)}', { method: 'POST', headers: { 'Content-Type': '
         // 파트너 로그인 아이디 기억하기 (비밀번호는 남기지 않습니다)
         const PC_SAVED_ID_KEY = 'pcSavedLoginId';
         // 화면 판 — 고칠 때마다 올립니다. 로그인 화면 아래와 상단 로고 말풍선에 보입니다 (2026-09-16)
+        // 화면 버전 표시 (2026-11-16) — .js-app-ver 에 "그룹웨어 v1.1.0 · 운영" (data-app: groupware · calendar · auto)
+        function kobVersionText(app) {
+            const v = window.KOB_VERSION || {}, env = (window.KOB_CONFIG || {}).env || '';
+            if (app === 'auto') app = isCalendarMode() ? 'calendar' : 'groupware';
+            const name = app === 'calendar' ? '킹오더일정' : '그룹웨어';
+            const envName = { dev: '개발', prod: '운영' }[env] || env;
+            return name + ' v' + (v[app] || '?') + (envName ? ' · ' + envName : '');
+        }
+        function kobFillVersions() { document.querySelectorAll('.js-app-ver').forEach(el => { el.textContent = kobVersionText(el.dataset.app || 'groupware'); el.title = '화면 버전 · ' + ((window.KOB_VERSION || {}).date || ''); }); }
+        if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', kobFillVersions); else kobFillVersions();
         const PC_BUILD = '2026-09-16.22';
         function stampPartnerBuild() {
             document.querySelectorAll('.js-pc-build').forEach(el => { el.textContent = PC_BUILD + ((window.KOB_CONFIG || {}).env ? ` · ${window.KOB_CONFIG.env}` : ''); });
@@ -64747,6 +66458,11 @@ await fetch('${escapeHtml(url)}', { method: 'POST', headers: { 'Content-Type': '
             }
         }
 
+        // 킹오더일정 — 휴대폰 전용 일정 화면 (2026-11-12). 그룹웨어 로그인 · 일정 코드를 그대로 쓰고 일정 화면만 보여 줍니다.
+        function isCalendarMode() {
+            const p = new URLSearchParams(location.search);
+            return p.get('mode') === 'calendar' || location.hash === '#calendar';
+        }
         function isMobileMode() {
             const p = new URLSearchParams(location.search);
             return p.get('mode') === 'mobile' || location.hash === '#mobile';
@@ -65917,6 +67633,10 @@ await fetch('${escapeHtml(url)}', { method: 'POST', headers: { 'Content-Type': '
             bootMobileView();
         } else if (isPartnerMode()) {
             bootPartnerView();
+        } else if (isCalendarMode()) {
+            // 킹오더일정 — 로그인 화면 제목만 바꾸고, 파트너 · 인바운드 동기화는 돌리지 않습니다 (일정 화면에 없음)
+            const lt = document.getElementById('login-title'); if (lt) lt.textContent = '킹오더일정';
+            initLiveRefresh();         // 직원 · 구분 같은 설정은 다른 사람이 바꾸면 받아 옵니다
         } else {
             // 예전 외주업체 전용 주소(?mode=inbound · #inbound)로 들어오면 그냥 그룹웨어 로그인으로 보냅니다.
             // 인바운드 관리는 2026-09-08 부터 그룹웨어 안(파트너센터 › 영업본부)에 있습니다.

@@ -366,6 +366,11 @@ export function recurrenceOf(s, allDay) {
 }
 
 // 구글 일정 → 그룹웨어 일정 (있던 값은 지키고 바뀐 것만 덮습니다)
+// 날짜 · 시간 · 제목 · 참석자 이름 — 이것이 바뀌면 '변경됨' (index.html scheduleChangeSig 와 같게)
+function changeSig(s) {
+    const names = (Array.isArray(s && s.attendees) ? s.attendees : []).map(a => a && a.name).filter(Boolean).sort();
+    return JSON.stringify([s.date || '', s.endDate || '', s.allDay === true, s.startTime || '', s.endTime || '', s.title || '', names]);
+}
 export function fromGoogleEvent(ev, calRow, before, ctx) {
     const s = Object.assign({}, before || {});
     s.title = str(ev.summary) || '(제목 없음)';
@@ -419,6 +424,11 @@ export function fromGoogleEvent(ev, calRow, before, ctx) {
         gByName.forEach(a => merged.push(a));                         // 폰에서 새로 초대한 사람
         s.attendees = merged;
     }
+    // 킹오더일정 새 일정 숫자 (2026-11-12) — 등록 시각 · 바뀐 시각 (화면 index.html 의 scheduleChangeSig 와 같은 기준)
+    const nowIso = new Date().toISOString();
+    // 처음 들어온 일정은 구글이 알려 주는 만든 시각 — 캘린더를 처음 연결할 때 예전 일정이 '새 일정' 으로 쏟아지지 않게 (2026-11-12 검토)
+    if (!before) s.createdAt = s.createdAt || str(ev.created) || nowIso;
+    else if (changeSig(before) !== changeSig(s)) { s.changedAt = nowIso; s.changedBy = ''; }
     return s;
 }
 

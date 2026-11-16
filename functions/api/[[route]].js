@@ -321,6 +321,35 @@ export async function onRequest(context) {
     try { store = db(env); } catch (e) { return json(500, { ok: false, error: e.message }); }
 
     try {
+        // ---------- 서버 받아쓰기 (2026-11-16 · 킹오더일정 음성 안내 실험실) ----------
+        // 아이폰 웹 받아쓰기가 두 번째부터 소리를 못 받는 문제 → 휴대폰은 녹음만, 글자는 여기서 OpenAI 로.
+        // 직원 이름(퇴사자 제외)을 함께 넘겨 이름을 잘 알아듣게 합니다. 열쇠는 환경변수 OPENAI_API_KEY, 모델은 STT_MODEL(기본 gpt-transcribe).
+        if (path === '/api/stt' && method === 'POST') {
+            const who = await requireStaff(env, store, request);
+            if (who.error) return who.error;
+            const keyAi = str(env.OPENAI_API_KEY);
+            if (!keyAi) return json(503, { ok: false, error: 'no-key', message: '서버 받아쓰기 열쇠(OPENAI_API_KEY)가 아직 없습니다.' });
+            const type = str(request.headers.get('Content-Type')).toLowerCase();
+            const buf = await request.arrayBuffer();
+            if (!buf.byteLength) return json(400, { ok: false, error: '녹음이 비어 있습니다.' });
+            if (buf.byteLength > 8 * 1024 * 1024) return json(413, { ok: false, error: '녹음이 너무 깁니다.' });
+            const ext = /webm/.test(type) ? 'webm' : /ogg/.test(type) ? 'ogg' : /wav/.test(type) ? 'wav' : /mpeg|mp3/.test(type) ? 'mp3' : 'm4a';
+            const uv = await store.storeValues(['gwUsers.v1']);
+            const names = (Array.isArray(uv['gwUsers.v1']) ? uv['gwUsers.v1'] : []).filter(u => u && u.name && u.resigned !== true).map(u => str(u.name));
+            const prompt = `킹오더브라더스 회사 일정 등록 대화. 날짜·시간은 숫자로 (예: 오후 2시 30분, 11월 20일). 직원 이름: ${Array.from(new Set(names)).join(', ')}. 네, 아니요, 참석자, 세부내용, 취소.`;
+            const fd = new FormData();
+            fd.append('file', new Blob([buf], { type: type || 'audio/mp4' }), 'speech.' + ext);
+            fd.append('model', str(env.STT_MODEL) || 'gpt-transcribe');
+            fd.append('language', 'ko');
+            fd.append('prompt', prompt.slice(0, 900));
+            fd.append('response_format', 'json');
+            const t0 = Date.now();
+            const r = await fetch('https://api.openai.com/v1/audio/transcriptions', { method: 'POST', headers: { Authorization: `Bearer ${keyAi}` }, body: fd });
+            let j = {}; try { j = await r.json(); } catch (e) { }
+            if (!r.ok) return json(502, { ok: false, error: (j && j.error && j.error.message) || ('받아쓰기 서버 오류 ' + r.status) });
+            return json(200, { ok: true, text: str(j.text).trim(), ms: Date.now() - t0 });
+        }
+
         // ---------- 대한민국 공휴일 (2026-09-29 · 판단은 _holidays.js) ----------
         // 공개 자료라 로그인 없이. 저장된 것이 하루 넘었으면 구글 공휴일 캘린더를 새로 받아 app_store 에 둡니다.
         if (path === '/api/holidays' && method === 'GET') {
@@ -487,7 +516,9 @@ export async function onRequest(context) {
                 const ep = url.searchParams.get('endpoint');
                 return json(200, { ok: true, ready: push.keysReady(env), thisDevice: ep ? push.hasSub(rec, ep) : undefined,
                                    devices: rec.subs.map(x => ({ device: x.device, at: x.at, endpointTail: String(x.endpoint).slice(-12) })),
-                                   prefs: Object.fromEntries(push.CATEGORIES.map(c => [c.id, push.wants(rec, c.id)])), categories: push.CATEGORIES });
+                                   prefs: Object.fromEntries(push.CATEGORIES.map(c => [c.id, push.wants(rec, c.id)])), categories: push.CATEGORIES,
+                                   calNew: Object.fromEntries(push.CAL_NEW_IDS.map(id => [id, push.calNewWanted(rec, id)])), calNames: push.CAL_SHORT,
+                                   thisApps: ep ? ((rec.subs.find(x => x.endpoint === ep) || {}).apps || []) : undefined });
             }
             if (path === '/api/push/subscribe' && method === 'POST') {
                 if (!push.validSubscription(input.subscription)) return bad('알림 구독 정보가 올바르지 않습니다.');
@@ -496,7 +527,7 @@ export async function onRequest(context) {
                 for (const r of await store.storeLike(push.PREFIX)) {
                     if (r.key !== myKey && push.hasSub(r.value, ep)) await store.setStore(r.key, push.removeSub(r.value, ep));
                 }
-                await store.setStore(myKey, push.addSub(await loadMine(), input.subscription, input.device));
+                await store.setStore(myKey, push.addSub(await loadMine(), input.subscription, input.device, null, str(input.app)));
                 return json(200, { ok: true });
             }
             if (path === '/api/push/unsubscribe' && method === 'POST') {
@@ -529,13 +560,13 @@ export async function onRequest(context) {
                 const recips = push.recipientsOf(users, n, st.me.email);
                 const recs = recips.length ? await store.storeValues(recips.map(u => push.keyOf(u.id))) : {};
                 let targets = recips.map(u => ({ key: push.keyOf(u.id), rec: push.normRec(recs[push.keyOf(u.id)]) }))
-                    .filter(x => push.wants(x.rec, cat)).flatMap(x => x.rec.subs.filter(push.validSubscription).map(sub => ({ key: x.key, sub })));   // 저장된 주소도 알려진 푸시 서버인지 다시 확인 (2026-10-28)
+                    .filter(x => push.wants(x.rec, cat)).flatMap(x => push.pickSubsFor(x.rec, cat).filter(push.validSubscription).map(sub => ({ key: x.key, sub })));   // 저장된 주소도 알려진 푸시 서버인지 다시 확인 (2026-10-28) · 일정 알림은 킹오더일정 앱으로 (2026-11-12)
                 const total = targets.length;
                 targets = targets.slice(0, push.MAX_TARGETS);
                 let sent = 0; const gone = [];
                 await Promise.all(targets.map(async ({ key, sub }) => {
                     try {
-                        const q = await push.buildRequest(sub, payload, env);
+                        const q = await push.buildRequest(sub, push.forSub(payload, sub), env);
                         const res = await fetch(q.url, q.init);
                         if (res.status === 404 || res.status === 410) gone.push({ key, ep: sub.endpoint });   // 브라우저가 구독을 버림
                         else if (res.ok) sent++;
@@ -544,6 +575,48 @@ export async function onRequest(context) {
                 }));
                 for (const g of gone) await store.setStore(g.key, push.removeSub(recs[g.key], g.ep));
                 return json(200, { ok: true, sent, targets: total, skipped: total - targets.length, removed: gone.length });
+            }
+            // 새 일정 알림 (킹오더일정 · 2026-11-12) — 받는 사람은 서버가 캘린더 · 부서 · 각자 켬/끔으로 고릅니다.
+            //   요청 본문을 믿지 않고 저장된 일정을 다시 읽어, 내가 방금(10분 안) 새로 만든 일정(rev 1)일 때만 보냅니다.
+            //   한 번에 MAX_TARGETS 대씩 — 남으면 next 를 돌려주고 화면이 이어서 부릅니다.
+            if (path === '/api/push/schedule-new' && method === 'POST') {
+                const sid = str(input.id);
+                if (!sid) return bad('일정이 없습니다.');
+                if (!push.keysReady(env)) return json(200, { ok: true, sent: 0, total: 0, skipped: 'VAPID 키가 설정되지 않았습니다.' });
+                let row = null;
+                for (let i = 0; i < 5 && !row; i++) {
+                    row = await store.rowRaw('schedules', sid);
+                    if (!row) await new Promise(r => setTimeout(r, 600));
+                }
+                if (!row) return json(404, { ok: false, error: '일정을 찾을 수 없습니다.' });
+                const age = Date.now() - new Date(row.updated_at).getTime();
+                if (row.rev !== 1 || str(row.updated_by).toLowerCase() !== str(st.me.email).toLowerCase() || !(age < 10 * 60 * 1000)) {
+                    return json(403, { ok: false, error: '본인이 방금 등록한 일정만 알릴 수 있습니다.' });
+                }
+                const sch = Object.assign({}, row.data || {}, { id: row.id });
+                if (sch.offState) return json(200, { ok: true, sent: 0, total: 0 });
+                const users = (await store.storeValue('gwUsers.v1')) || [];
+                const recips = push.scheduleNewRecipients(users, sch, st.me.email, input.viewers);
+                const recs = recips.length ? await store.storeValues(recips.map(u => push.keyOf(u.id))) : {};
+                const all = recips.map(u => ({ key: push.keyOf(u.id), rec: push.normRec(recs[push.keyOf(u.id)]) }))
+                    .filter(x => push.calNewWanted(x.rec, str(sch.calendar)))
+                    .flatMap(x => push.pickSubsFor(x.rec, 'schedule').filter(push.validSubscription).map(sub => ({ key: x.key, sub })));
+                const offset = Math.max(0, Math.floor(Number(input.offset) || 0));
+                const batch = all.slice(offset, offset + push.MAX_TARGETS);
+                const payload = push.scheduleNewPayload(sch);
+                let sent = 0; const gone = [];
+                await Promise.all(batch.map(async ({ key, sub }) => {
+                    try {
+                        const q = await push.buildRequest(sub, push.forSub(payload, sub), env);
+                        const res = await fetch(q.url, q.init);
+                        if (res.status === 404 || res.status === 410) gone.push({ key, ep: sub.endpoint });
+                        else if (res.ok) sent++;
+                        else console.warn('[push] 새 일정 보내기 실패', res.status, (await res.text()).slice(0, 200));
+                    } catch (e) { console.warn('[push] 새 일정 보내기 오류', e && e.message); }
+                }));
+                for (const g of gone) await store.setStore(g.key, push.removeSub(recs[g.key], g.ep));
+                const next = offset + batch.length < all.length ? offset + batch.length : undefined;
+                return json(200, { ok: true, sent, total: all.length, next, removed: gone.length });
             }
             return json(404, { ok: false, error: '존재하지 않는 경로입니다: ' + path });
         }
